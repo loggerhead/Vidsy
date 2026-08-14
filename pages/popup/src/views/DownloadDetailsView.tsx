@@ -222,6 +222,14 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
   const eta = speed > 0 && totalBytes > downloadedBytes ? (totalBytes - downloadedBytes) / speed : undefined;
   const isHttpDirect = entry.item?.kind === 'video' || entry.item?.kind === 'audio';
   const resumeCapability = isHttpDirect ? 'Yes (Range)' : 'During mux only';
+  const transferLabel =
+    entry.transferMode === 'range'
+      ? `Parallel Range${entry.connectionLimit ? ` · up to ${entry.connectionLimit}` : ''}`
+      : entry.transferMode === 'mixed'
+        ? `Range + stream${entry.connectionLimit ? ` · up to ${entry.connectionLimit}` : ''}`
+        : entry.transferMode === 'stream'
+          ? 'Single stream'
+          : 'Detecting…';
 
   // Honest status: if stage is a download phase but no bytes have arrived in
   // the last 5s, show "Connecting…" instead of the optimistic "Receiving…".
@@ -377,6 +385,19 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
             <span className={`text-[11px] ${labelCol}`}>Transfer rate</span>
             <span className={`font-mono text-[11px] font-medium ${valueCol}`}>
               {speed > 0 && !isMuxing ? formatSpeed(speed) : '—'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className={`shrink-0 text-[11px] ${labelCol}`}>Transport</span>
+            <span className={`truncate text-right text-[11px] font-medium ${valueCol}`} title={entry.fallbackReason}>
+              {transferLabel}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] ${labelCol}`}>Active connections</span>
+            <span className={`font-mono text-[11px] font-medium ${valueCol}`}>
+              {entry.activeConnections ?? '—'}
+              {entry.connectionLimit ? ` / ${entry.connectionLimit}` : ''}
             </span>
           </div>
           <div className="flex items-center justify-between">

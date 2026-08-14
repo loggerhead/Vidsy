@@ -6,13 +6,13 @@ const sanitizeFileNamePart = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-export type DownloadState = { busyUrl: string | null; error: string | null };
+type DownloadState = { busyUrl: string | null; error: string | null };
 
 // Badge answers "how is this delivered?" (HTTP / HLS / DASH / MSS / MSE) rather
 // than "what container?". Container is irrelevant since the downloader always
 // muxes to MP4/MP3. `+A` appended when a separate audio track is paired with a
 // video-only stream (Instagram-style delivery).
-export const mediaBadgeLabel = (item: Pick<MediaItem, 'kind' | 'audioUrl'>): string => {
+const mediaBadgeLabel = (item: Pick<MediaItem, 'kind' | 'audioUrl'>): string => {
   let base: string;
   switch (item.kind) {
     case 'hls':
@@ -40,7 +40,7 @@ export const mediaBadgeLabel = (item: Pick<MediaItem, 'kind' | 'audioUrl'>): str
   return item.kind === 'video' && item.audioUrl ? `${base}+A` : base;
 };
 
-export const kindBadgeColor = (kind: MediaItem['kind'], isLight: boolean): string => {
+const kindBadgeColor = (kind: MediaItem['kind'], isLight: boolean): string => {
   const map: Record<string, string> = {
     hls: isLight ? 'bg-white/50 text-blue-900 ring-1 ring-white/40' : 'bg-black/40 text-blue-200 ring-1 ring-white/15',
     video: isLight
@@ -64,7 +64,7 @@ export const kindBadgeColor = (kind: MediaItem['kind'], isLight: boolean): strin
   return map[kind] ?? map.other;
 };
 
-export const formatDuration = (secs: number): string => {
+const formatDuration = (secs: number): string => {
   if (!isFinite(secs) || secs <= 0) return '';
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
@@ -73,18 +73,18 @@ export const formatDuration = (secs: number): string => {
   return `${m}:${String(s).padStart(2, '0')}`;
 };
 
-export const formatSpeed = (bps: number): string => {
+const formatSpeed = (bps: number): string => {
   if (bps >= 1_048_576) return `${(bps / 1_048_576).toFixed(1)} MB/s`;
   if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
   return `${Math.round(bps)} B/s`;
 };
 
-export const formatDate = (ts: number): string => {
+const formatDate = (ts: number): string => {
   const d = new Date(ts);
   return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 };
 
-export const pickBestVariant = (variants: MediaVariant[]): MediaVariant | undefined =>
+const pickBestVariant = (variants: MediaVariant[]): MediaVariant | undefined =>
   variants.reduce<MediaVariant | undefined>((best, curr) => {
     if (!best) return curr;
     const bh = best.resolution?.height ?? 0;
@@ -95,16 +95,16 @@ export const pickBestVariant = (variants: MediaVariant[]): MediaVariant | undefi
 
 // "1080p" conventionally names the short edge — a portrait video of 1080×1920
 // is still "1080p", not "1920p".
-export const shortEdgeLabel = (r: { width: number; height: number }) => `${Math.min(r.width, r.height)}p`;
+const shortEdgeLabel = (r: { width: number; height: number }) => `${Math.min(r.width, r.height)}p`;
 
-export const formatFileSize = (bytes?: number): string => {
+const formatFileSize = (bytes?: number): string => {
   if (!bytes || bytes <= 0) return '';
   const units = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 };
 
-export const variantLabel = (v: MediaVariant): string => {
+const variantLabel = (v: MediaVariant): string => {
   if (v.resolution) return shortEdgeLabel(v.resolution);
   if (v.bandwidth) return `${Math.round(v.bandwidth / 1000)}k`;
   return v.name ?? 'Auto';
@@ -114,7 +114,7 @@ export const variantLabel = (v: MediaVariant): string => {
 // can compare qualities at a glance. Size is exact when known (HTTP HEAD or
 // network response), estimated (~) for HLS/DASH variants when bandwidth and
 // duration are both set.
-export const variantDescriptor = (v: MediaVariant, durationSec?: number): string => {
+const variantDescriptor = (v: MediaVariant, durationSec?: number): string => {
   const wxh = v.resolution ? `${v.resolution.width}×${v.resolution.height}` : (v.name ?? 'Auto');
   let sizeStr = '';
   if (v.contentLength) {
@@ -127,7 +127,38 @@ export const variantDescriptor = (v: MediaVariant, durationSec?: number): string
   return [wxh, sizeStr].filter(Boolean).join(' · ');
 };
 
-export type FilenameTemplateContext = {
+const variantContainer = (v: MediaVariant): string | undefined => {
+  const mimeType = v.mimeType?.toLowerCase();
+  if (mimeType?.includes('mp4')) return 'MP4';
+  if (mimeType?.includes('webm')) return 'WEBM';
+  return undefined;
+};
+
+const variantCodec = (v: MediaVariant): string | undefined => {
+  const codecs = v.codecs?.toLowerCase() ?? '';
+  if (codecs.includes('av01')) return 'AV1';
+  if (codecs.includes('vp9') || codecs.includes('vp09')) return 'VP9';
+  if (codecs.includes('avc1')) return 'H.264';
+  if (codecs.includes('hev1') || codecs.includes('hvc1')) return 'H.265';
+  return undefined;
+};
+
+const variantOptionLabel = (v: MediaVariant): string => {
+  const resolution = v.resolution ? `${v.resolution.width}×${v.resolution.height}` : undefined;
+  const frameRate = v.frameRate && v.frameRate > 30 ? `${v.frameRate}fps` : undefined;
+  const bitrate =
+    v.bandwidth && v.bandwidth > 0
+      ? v.bandwidth >= 1_000_000
+        ? `${(v.bandwidth / 1_000_000).toFixed(1)} Mbps`
+        : `${Math.round(v.bandwidth / 1000)} Kbps`
+      : undefined;
+  const details = [variantContainer(v), variantCodec(v), resolution, frameRate, bitrate].filter(
+    (part, index, parts): part is string => !!part && parts.indexOf(part) === index,
+  );
+  return details.length > 0 ? details.join(' · ') : (v.name ?? 'Auto');
+};
+
+type FilenameTemplateContext = {
   title?: string;
   resolution?: string; // e.g. "1080p"
   ext?: string; // e.g. "mp4", "mp3" (no leading dot)
@@ -136,7 +167,7 @@ export type FilenameTemplateContext = {
   date?: string; // YYYY-MM-DD
 };
 
-export const buildFilenameContext = (
+const buildFilenameContext = (
   item: Pick<MediaItem, 'title' | 'kind' | 'pageUrl' | 'url' | 'variants'>,
   opts: { resolution?: string; ext?: string; date?: Date } = {},
 ): FilenameTemplateContext => {
@@ -164,7 +195,7 @@ export const buildFilenameContext = (
 // Renders a filename template against a media item. Returns undefined when the
 // template is empty or every token resolves to empty — callers should fall back
 // to their default filename derivation in that case.
-export const renderFilenameTemplate = (template: string, ctx: FilenameTemplateContext): string | undefined => {
+const renderFilenameTemplate = (template: string, ctx: FilenameTemplateContext): string | undefined => {
   const tpl = template.trim();
   if (!tpl) return undefined;
   const tokens: Record<string, string | undefined> = {
@@ -188,13 +219,32 @@ export const renderFilenameTemplate = (template: string, ctx: FilenameTemplateCo
   return collapsed.length > 0 ? collapsed.slice(0, 180) : undefined;
 };
 
-export const FILENAME_TOKEN_HINT = '{title} {resolution} {ext} {kind} {host} {date}';
+const FILENAME_TOKEN_HINT = '{title} {resolution} {ext} {kind} {host} {date}';
 
 // True when the item's source URL is something a mobile browser can fetch and
 // play directly (no HLS/DASH muxing, no separate audio track to merge). Used
 // to decide whether to show a "Share to mobile" QR action.
-export const isMobileShareableUrl = (item: Pick<MediaItem, 'kind' | 'url' | 'audioUrl'>): boolean => {
+const isMobileShareableUrl = (item: Pick<MediaItem, 'kind' | 'url' | 'audioUrl'>): boolean => {
   if (item.kind !== 'video' && item.kind !== 'audio') return false;
   if (item.audioUrl) return false; // separate audio track — mobile can't merge
   return /^https?:\/\//i.test(item.url);
 };
+
+export {
+  FILENAME_TOKEN_HINT,
+  buildFilenameContext,
+  formatDate,
+  formatDuration,
+  formatFileSize,
+  formatSpeed,
+  isMobileShareableUrl,
+  kindBadgeColor,
+  mediaBadgeLabel,
+  pickBestVariant,
+  renderFilenameTemplate,
+  shortEdgeLabel,
+  variantDescriptor,
+  variantLabel,
+  variantOptionLabel,
+};
+export type { DownloadState, FilenameTemplateContext };

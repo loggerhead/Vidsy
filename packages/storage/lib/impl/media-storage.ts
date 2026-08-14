@@ -1,7 +1,7 @@
 import { createStorage, StorageEnum } from '../base/index.js';
 
 // Local copies to avoid depending on @extension/shared and introducing a cycle
-type MediaKind = 'video' | 'audio' | 'hls' | 'dash' | 'subtitle' | 'other';
+type MediaKind = 'video' | 'audio' | 'hls' | 'dash' | 'mss' | 'mse' | 'subtitle' | 'other';
 type MediaSource = 'element' | 'network';
 type SubtitleFormat = 'vtt' | 'srt' | 'ttml' | 'xml';
 type SubtitleTrack = {
@@ -14,8 +14,10 @@ type SubtitleTrack = {
 type MediaVariant = {
   url: string;
   name?: string;
+  mimeType?: string;
   bandwidth?: number;
   resolution?: { width: number; height: number };
+  frameRate?: number;
   codecs?: string;
   audioUrl?: string;
   audioMimeType?: string;
@@ -42,6 +44,7 @@ type MediaItem = {
   isDrmProtected?: boolean;
 };
 type MediaDownloadStage =
+  | 'queued'
   | 'init'
   | 'fetch-manifest'
   | 'download-video'
@@ -64,12 +67,25 @@ type MediaDownloadProgress = {
   outputFormat?: 'mp4' | 'mp3';
   startedAt?: number;
   updatedAt?: number;
+  chunks?: Array<{
+    i: number;
+    start: number;
+    end: number;
+    downloaded: number;
+    status: 'pending' | 'fetching' | 'done' | 'error';
+  }>;
+  transferMode?: 'range' | 'stream' | 'mixed';
+  activeConnections?: number;
+  connectionLimit?: number;
+  fallbackReason?: string;
+  queuePosition?: number;
 };
 type MediaDownloadState = Record<string, MediaDownloadProgress>;
 type MediaHistoryItem = MediaItem & {
   downloadedAt: number;
   status: 'success' | 'failed';
   failureReason?: string;
+  downloadId?: number;
 };
 type MediaDetectionState = Record<string, MediaItem[]>;
 type MediaHistoryState = MediaHistoryItem[];

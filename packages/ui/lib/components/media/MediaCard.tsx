@@ -11,6 +11,7 @@ import {
   pickBestVariant,
   shortEdgeLabel,
   formatDuration,
+  variantOptionLabel,
 } from '@extension/shared';
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -288,29 +289,49 @@ export const MediaCard = ({
                 <IconEdit />
               </button>
               {(() => {
-                // Only variants with a known resolution appear in the dropdown.
-                // We show just "W×H" — no size, no Auto fallback, no bandwidth.
                 const resolvedVariants = item.variants?.filter((v: MediaVariant) => v.resolution) ?? [];
                 if (resolvedVariants.length > 1) {
+                  const selectedQuality = currentVariant?.resolution
+                    ? shortEdgeLabel(currentVariant.resolution)
+                    : 'Auto';
                   return (
-                    <select
+                    <div
                       className={cn(
-                        'rounded-md border px-1.5 py-0.5 text-[10px] font-bold outline-none',
+                        'relative shrink-0 rounded-md border text-[10px] font-bold focus-within:ring-2 focus-within:ring-blue-500/30',
                         isLight
                           ? 'border-gray-200 bg-gray-100 text-gray-700'
                           : 'border-white/[0.08] bg-white/[0.06] text-gray-300',
-                      )}
-                      value={currentVariantUrl}
-                      onChange={e => setSelectedVariants(prev => ({ ...prev, [item.id]: e.target.value }))}>
-                      {resolvedVariants.map((v: MediaVariant) => (
-                        <option
-                          key={v.url}
-                          value={v.url}
-                          className={isLight ? 'bg-white text-gray-800' : 'bg-gray-800 text-gray-200'}>
-                          {`${v.resolution!.width}×${v.resolution!.height}`}
-                        </option>
-                      ))}
-                    </select>
+                      )}>
+                      <span className="pointer-events-none flex items-center gap-1 px-2 py-0.5 pr-6" aria-hidden="true">
+                        <span>MP4</span>
+                        <span className={isLight ? 'text-blue-600' : 'text-blue-400'}>{selectedQuality}</span>
+                      </span>
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 opacity-60">
+                        <path d="m6 8 4 4 4-4" />
+                      </svg>
+                      <select
+                        aria-label="Video format and quality"
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        value={currentVariantUrl}
+                        onChange={e => setSelectedVariants(prev => ({ ...prev, [item.id]: e.target.value }))}>
+                        {resolvedVariants.map((v: MediaVariant) => (
+                          <option
+                            key={v.url}
+                            value={v.url}
+                            className={isLight ? 'bg-white text-gray-800' : 'bg-gray-800 text-gray-200'}>
+                            {variantOptionLabel(v)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   );
                 }
                 if (resLabel) {

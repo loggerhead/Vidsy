@@ -2,31 +2,6 @@ import { upsertDetection } from './detection';
 import { deriveKind } from './media-utils';
 import type { MediaKind, PasteUrlResult } from '@extension/shared';
 
-// Hostnames where the page URL itself is what the user pastes — not a media URL.
-// Vidsy cannot turn a watch-page URL into a downloadable stream (we'd need a
-// site-specific extractor, which we explicitly do not ship — see
-// project_competitor_deep_dive_2026_05). Reject early with a clear message.
-const PAGE_HOSTS_NOT_SUPPORTED = new Set([
-  'youtube.com',
-  'www.youtube.com',
-  'm.youtube.com',
-  'youtu.be',
-  'music.youtube.com',
-]);
-
-// Hostnames that serve YouTube media CDN URLs. Even if a user obtains a direct
-// videoplayback URL elsewhere, we won't download it — CWS content policies
-// forbid facilitating YouTube downloads regardless of the entry point.
-const SUFFIX_HOSTS_NOT_SUPPORTED = ['.googlevideo.com', '.youtube.com'];
-
-const hostOf = (url: string): string | null => {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-};
-
 const probeContentType = async (url: string): Promise<string | undefined> => {
   try {
     const res = await fetch(url, { method: 'HEAD', credentials: 'omit', redirect: 'follow' });
@@ -70,14 +45,6 @@ export const classifyAndAddUrl = async (url: string, tabId?: number, pageUrl?: s
   if (!trimmed) return { ok: false, error: 'No URL provided' };
   if (!/^https?:\/\//i.test(trimmed)) {
     return { ok: false, error: 'URL must start with http:// or https://' };
-  }
-
-  const host = hostOf(trimmed);
-  if (host && PAGE_HOSTS_NOT_SUPPORTED.has(host)) {
-    return { ok: false, error: 'Vidsy cannot download from this site (Chrome Web Store rule)' };
-  }
-  if (host && SUFFIX_HOSTS_NOT_SUPPORTED.some(suffix => host.endsWith(suffix))) {
-    return { ok: false, error: 'Vidsy cannot download from this site (Chrome Web Store rule)' };
   }
 
   // Phase 1: classify by URL extension alone (fast path)

@@ -14,8 +14,10 @@ export type SubtitleTrack = {
 export type MediaVariant = {
   url: string;
   name?: string;
+  mimeType?: string;
   bandwidth?: number;
   resolution?: { width: number; height: number };
+  frameRate?: number;
   // Exact size in bytes. Set when the variant is an HTTP file whose
   // Content-Length we learned via HEAD or a network response. Absent for
   // HLS/DASH segments (use bandwidth × duration for an estimate).
@@ -103,6 +105,10 @@ export type MediaDownloadProgress = {
   updatedAt?: number;
   queuePosition?: number; // 1-based, shown when stage === 'queued'
   chunks?: ChunkProgress[]; // per-connection breakdown (HTTP range only)
+  transferMode?: 'range' | 'stream' | 'mixed';
+  activeConnections?: number;
+  connectionLimit?: number;
+  fallbackReason?: string;
 };
 
 export type MediaDownloadState = Record<string, MediaDownloadProgress>;

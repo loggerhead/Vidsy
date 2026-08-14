@@ -3,6 +3,7 @@ import type { ChunkProgress, MediaDownloadProgress, MediaDownloadState, MediaIte
 
 type ProgressUpdate = {
   stage:
+    | 'queued'
     | 'init'
     | 'fetch-manifest'
     | 'download-video'
@@ -19,6 +20,11 @@ type ProgressUpdate = {
   muxPercent?: number;
   downloadId?: number;
   chunks?: ChunkProgress[];
+  transferMode?: 'range' | 'stream' | 'mixed';
+  activeConnections?: number;
+  connectionLimit?: number;
+  fallbackReason?: string;
+  queuePosition?: number;
 };
 
 type ProgressContext = {
@@ -43,6 +49,11 @@ export const updateProgress = async (key: string, progress: ProgressUpdate, cont
     startedAt: existing?.startedAt ?? now,
     updatedAt: now,
     chunks: progress.chunks ?? existing?.chunks,
+    transferMode: progress.transferMode ?? existing?.transferMode,
+    activeConnections: progress.activeConnections ?? existing?.activeConnections,
+    connectionLimit: progress.connectionLimit ?? existing?.connectionLimit,
+    fallbackReason: progress.fallbackReason ?? existing?.fallbackReason,
+    queuePosition: progress.queuePosition,
   };
   const next: MediaDownloadState = { ...current, [key]: entry };
   await mediaDownloadsStorage.set(next);

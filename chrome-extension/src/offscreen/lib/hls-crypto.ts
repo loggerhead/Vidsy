@@ -1,3 +1,4 @@
+import { headersForFetch } from './hls-request';
 import type { HlsKeyInfo } from './m3u8-parser';
 
 const hlsKeyCache = new Map<string, CryptoKey>();
@@ -7,9 +8,7 @@ const getHlsDecryptionKey = async (keyUri: string, headers?: Record<string, stri
   if (cached) return cached;
 
   const res = await fetch(keyUri, {
-    headers: Object.fromEntries(
-      Object.entries(headers || {}).filter(([k]) => !['Origin', 'Referer', 'Cookie'].includes(k)),
-    ),
+    headers: headersForFetch(headers),
     credentials: 'include',
   });
   if (!res.ok) throw new Error(`Failed to fetch HLS key: ${res.status}`);

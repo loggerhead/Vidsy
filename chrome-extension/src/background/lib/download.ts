@@ -1,5 +1,6 @@
 import { cancelQueued, enqueueDownload, setQueueRunner } from './download-queue';
-import { capturedRequestHeaders, injectHeadersForDownload, removeHeadersForDownload } from './header-capture';
+import { browserDownloadTerminal } from './browser-download-state';
+import { findCapturedHeaders, injectHeadersForDownload, removeHeadersForDownload } from './header-capture';
 import { addHistoryEntry } from './history';
 import { dlLog } from './logger';
 import { createId, deriveKind, deriveFileName, isHlsKind, isDashKind, sanitizeFileName } from './media-utils';
@@ -13,6 +14,13 @@ let offscreenCreated = false;
 // downloadId → blobUrl for OPFS-backed blobs that need offscreen-side cleanup
 // once the browser download completes or is cancelled.
 const opfsBackedDownloads = new Map<number, string>();
+const browserDownloadWaiters = new Map<
+  number,
+  {
+    resolve: (state: 'complete' | 'interrupted') => void;
+  }
+>();
+const terminalDownloadUpdates = new Map<number, Promise<void>>();
 
 const trackOpfsBackedDownload = (downloadId: number | undefined, blobUrl: string) => {
   if (typeof downloadId === 'number') opfsBackedDownloads.set(downloadId, blobUrl);
@@ -22,14 +30,71 @@ const triggerBlobCleanup = (blobUrl: string) => {
   chrome.runtime.sendMessage({ type: 'offscreen/cleanup-blob', payload: { blobUrl } }).catch(() => undefined);
 };
 
-const handleDownloadStateChange = (delta: chrome.downloads.DownloadDelta) => {
+const recordBrowserDownloadTerminal = async (delta: chrome.downloads.DownloadDelta): Promise<void> => {
   if (!delta.state?.current) return;
   const state = delta.state.current;
-  if (state !== 'complete' && state !== 'interrupted') return;
-  const blobUrl = opfsBackedDownloads.get(delta.id);
-  if (!blobUrl) return;
-  opfsBackedDownloads.delete(delta.id);
-  triggerBlobCleanup(blobUrl);
+  if (state !== 'in_progress' && state !== 'complete' && state !== 'interrupted') return;
+  const terminal = browserDownloadTerminal(state, delta.error?.current);
+  if (!terminal) return;
+  const existing = terminalDownloadUpdates.get(delta.id);
+  if (existing) return existing;
+
+  const update = (async () => {
+    const downloads = await mediaDownloadsStorage.get();
+    const match = Object.entries(downloads).find(([, progress]) => progress.downloadId === delta.id);
+    if (match) {
+      const [key, progress] = match;
+      if (progress.stage !== 'success' && progress.stage !== 'failed') {
+        if (terminal.stage === 'success') {
+          await updateProgress(key, {
+            stage: 'success',
+            downloadedBytes: progress.downloadedBytes,
+            downloadId: delta.id,
+          });
+          if (progress.item) await addHistoryEntry(progress.item, 'success', undefined, delta.id);
+        } else {
+          await updateProgress(key, {
+            stage: 'failed',
+            downloadedBytes: progress.downloadedBytes,
+            downloadId: delta.id,
+            error: terminal.error,
+          });
+          if (progress.item) await addHistoryEntry(progress.item, 'failed', terminal.error, delta.id);
+        }
+      }
+    }
+
+    const blobUrl = opfsBackedDownloads.get(delta.id);
+    if (blobUrl) {
+      opfsBackedDownloads.delete(delta.id);
+      triggerBlobCleanup(blobUrl);
+    }
+    if (state === 'complete' || state === 'interrupted') browserDownloadWaiters.get(delta.id)?.resolve(state);
+    browserDownloadWaiters.delete(delta.id);
+  })().finally(() => {
+    terminalDownloadUpdates.delete(delta.id);
+  });
+  terminalDownloadUpdates.set(delta.id, update);
+  await update;
+};
+
+const handleDownloadStateChange = (delta: chrome.downloads.DownloadDelta) => {
+  void recordBrowserDownloadTerminal(delta);
+};
+
+const waitForBrowserDownload = async (downloadId: number): Promise<'complete' | 'interrupted'> => {
+  const completion = new Promise<'complete' | 'interrupted'>(resolve => {
+    browserDownloadWaiters.set(downloadId, { resolve });
+  });
+  const [item] = await chrome.downloads.search({ id: downloadId });
+  if (item?.state === 'complete' || item?.state === 'interrupted') {
+    await recordBrowserDownloadTerminal({
+      id: downloadId,
+      state: { current: item.state },
+      error: item.error ? { current: item.error } : undefined,
+    });
+  }
+  return completion;
 };
 
 chrome.downloads.onChanged.addListener(handleDownloadStateChange);
@@ -129,7 +194,7 @@ const downloadDirect = async (
   });
   if (!res?.ok) throw new Error(res?.error || 'Download failed in offscreen');
 
-  const ext = res.ext || (output === 'mp3' ? '.mp3' : '.mp4');
+  const ext = res.artifact.extension;
   dlLog('downloadDirect: trigger final browser download', { blobUrl: res.blobUrl, ext });
   const downloadId = await chrome.downloads.download({
     url: res.blobUrl,
@@ -157,7 +222,7 @@ const downloadHlsMuxed = async (
   if (chrome.runtime.lastError) throw chrome.runtime.lastError;
   if (!res?.ok) throw new Error(res?.error || 'Download failed in offscreen');
 
-  const ext = res.ext || (output === 'mp3' ? '.mp3' : '.mp4');
+  const ext = res.artifact.extension;
   dlLog('downloadHlsMuxed: trigger final browser download', { blobUrl: res.blobUrl, ext });
   const downloadId = await chrome.downloads.download({
     url: res.blobUrl,
@@ -185,10 +250,13 @@ const downloadMergedCall = async (
   });
   if (chrome.runtime.lastError) throw chrome.runtime.lastError;
   if (!res?.ok) throw new Error(res?.error || 'Merged download failed in offscreen');
-  dlLog('downloadMergedCall: trigger final browser download', { blobUrl: res.blobUrl, ext: res.ext });
+  dlLog('downloadMergedCall: trigger final browser download', {
+    blobUrl: res.blobUrl,
+    ext: res.artifact.extension,
+  });
   const downloadId = await chrome.downloads.download({
     url: res.blobUrl,
-    filename: ensureExt(fileName, res.ext || '.mp4'),
+    filename: ensureExt(fileName, res.artifact.extension),
     conflictAction: 'uniquify',
     saveAs: false,
   });
@@ -212,7 +280,7 @@ const downloadDashMuxed = async (
   if (chrome.runtime.lastError) throw chrome.runtime.lastError;
   if (!res?.ok) throw new Error(res?.error || 'Download failed in offscreen');
 
-  const dashExt = res.ext || (output === 'mp3' ? '.mp3' : '.mp4');
+  const dashExt = res.artifact.extension;
   dlLog('downloadDashMuxed: trigger final browser download', { blobUrl: res.blobUrl, ext: dashExt });
   const downloadId = await chrome.downloads.download({
     url: res.blobUrl,
@@ -287,16 +355,22 @@ const runDownloadJob = async (payload: DownloadPayload) => {
     { item: mediaItem, outputFormat: payload.outputFormat ?? 'mp4' },
   );
 
-  // Retrieve captured headers (cookies, referer) for this URL
-  const captured = capturedRequestHeaders.get(payload.url)?.headers ?? capturedRequestHeaders.get(key)?.headers;
-  dlLog('handleDownload: finding headers for request', captured ?? 'No captured headers found');
-
-  // Inject Referer/Origin headers via declarativeNetRequest for CDN segment fetches
-  if (captured && Object.keys(captured).length > 0) {
-    await injectHeadersForDownload(payload.url, captured, key);
-  }
-
   try {
+    // Retrieve captured headers (cookies, referer) for this URL
+    const captured = findCapturedHeaders(payload.url, key, mediaItem.tabId);
+    dlLog(
+      'handleDownload: finding headers for request',
+      captured ? { headers: captured } : 'No captured headers found',
+    );
+
+    // Inject Referer/Origin headers via declarativeNetRequest for CDN segment fetches
+    if (captured && Object.keys(captured).length > 0) {
+      await injectHeadersForDownload(payload.url, captured, key);
+      if (payload.audioUrl) {
+        await injectHeadersForDownload(payload.audioUrl, captured, key);
+      }
+    }
+
     const outputFormat = payload.outputFormat ?? 'mp4';
     // HLS must always be muxed — direct download saves the m3u8 playlist as HTML
     const shouldMergeHls = isHlsKind(payload.kind, payload.url);
@@ -320,9 +394,17 @@ const runDownloadJob = async (payload: DownloadPayload) => {
             )
           : await downloadDirect(payload.url, fileName, key, outputFormat, captured);
 
+    await updateProgress(
+      key,
+      { stage: 'finalize', downloadedBytes: 0, downloadId: downloadId ?? undefined },
+      { item: mediaItem, outputFormat },
+    );
+    const browserState = await waitForBrowserDownload(downloadId);
+    if (browserState === 'interrupted') {
+      dlLog('handleDownload: browser download interrupted', { downloadId });
+      return { ok: false, error: 'Browser download interrupted', downloadId } as const;
+    }
     dlLog('handleDownload: success', { downloadId });
-    await updateProgress(key, { stage: 'success', downloadedBytes: 0, downloadId: downloadId ?? undefined });
-    await addHistoryEntry(mediaItem, 'success', undefined, downloadId ?? undefined);
     return { ok: true, downloadId } as const;
   } catch (error) {
     const isAbort = error instanceof Error && (error.name === 'AbortError' || /cancel/i.test(error.message));
@@ -340,7 +422,6 @@ const runDownloadJob = async (payload: DownloadPayload) => {
     }
 
     dlLog('handleDownload: failed with error', error);
-    console.error('Download failed', error);
     await updateProgress(key, {
       stage: 'failed',
       downloadedBytes: 0,
@@ -357,31 +438,8 @@ const runDownloadJob = async (payload: DownloadPayload) => {
 // invokes this for each pending job when concurrency allows — see download-queue.ts.
 setQueueRunner(runDownloadJob);
 
-// Hard reject downloads pointed at hosts whose content policies forbid third-
-// party downloaders from operating. This is defense-in-depth on top of the
-// content-script exclude_matches in the manifest and the host blocklists in
-// detection.ts / paste-url.ts — every entry point that reaches the download
-// pipeline must end here, so we refuse a download regardless of which UI path
-// triggered it.
-const RESTRICTED_HOST_SUFFIXES = ['.youtube.com', '.youtube-nocookie.com', '.googlevideo.com', '.ytimg.com'];
-
-const isRestrictedDownloadUrl = (url: string): boolean => {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    if (host === 'youtube.com' || host === 'youtu.be') return true;
-    return RESTRICTED_HOST_SUFFIXES.some(suffix => host.endsWith(suffix));
-  } catch {
-    return false;
-  }
-};
-
 export const handleDownload = async (payload: DownloadPayload) => {
   dlLog('handleDownload: enqueue request', payload);
-
-  if (isRestrictedDownloadUrl(payload.url)) {
-    dlLog('handleDownload: refusing — restricted host', payload.url);
-    return { ok: false, error: 'This platform is not supported.' } as const;
-  }
 
   // Subtitle fast-path: small text blobs, no offscreen, no progress state, no headers.
   // Route straight to chrome.downloads with a language-suffixed filename. These don't

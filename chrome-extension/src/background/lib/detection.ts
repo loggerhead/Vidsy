@@ -1,3 +1,5 @@
+import { handleFmp4RangeDetection, clearFmp4RangeDetectionsForTab } from './fmp4-range-detector';
+import { findCapturedHeaders } from './header-capture';
 import { parseHlsVariants, parseDashVariants } from './manifest-parser';
 import {
   createId,
@@ -388,6 +390,53 @@ const normalizeDetection = (candidate: Partial<MediaItem>, tabId?: number, pageU
   };
 };
 
+const hasPairedAudio = (item: Pick<MediaItem, 'kind' | 'audioUrl' | 'variants'>): boolean =>
+  item.kind === 'video' && (!!item.audioUrl || !!item.variants?.some(v => v.audioUrl));
+
+const isVariantAuthority = (item: MediaItem): boolean =>
+  item.kind === 'video' && item.source === 'element' && !!item.variants?.length && hasPairedAudio(item);
+
+const sameMainPlayerSession = (a: MediaItem, b: MediaItem): boolean => {
+  if (!a.pageUrl || !b.pageUrl || a.pageUrl !== b.pageUrl) return false;
+  if (a.duration && b.duration && Math.abs(a.duration - b.duration) >= 2) return false;
+  return true;
+};
+
+const combineMseAndFetchable = (mse: MediaItem, fetchable: MediaItem): MediaItem => ({
+  ...mse,
+  ...fetchable,
+  id: mse.id,
+  title: mse.title ?? fetchable.title,
+  fileName: deriveFileName(fetchable.url, mse.title ?? fetchable.title),
+  thumbnail: mse.thumbnail ?? fetchable.thumbnail,
+  duration: mse.duration ?? fetchable.duration,
+  detectedAt: Math.min(mse.detectedAt, fetchable.detectedAt),
+});
+
+const reconcileMainPlayerEvidence = (
+  items: MediaItem[],
+  incoming: MediaItem,
+): { items: MediaItem[]; consumed: boolean } => {
+  if (incoming.kind !== 'mse' && !hasPairedAudio(incoming)) return { items, consumed: false };
+
+  const incomingIsMse = incoming.kind === 'mse';
+  const counterpartIdx = items.findIndex(item => {
+    if (!sameMainPlayerSession(item, incoming)) return false;
+    return incomingIsMse ? hasPairedAudio(item) : item.kind === 'mse';
+  });
+
+  if (counterpartIdx === -1) return { items, consumed: false };
+
+  const counterpart = items[counterpartIdx];
+  const merged = incomingIsMse
+    ? combineMseAndFetchable(incoming, counterpart)
+    : combineMseAndFetchable(counterpart, incoming);
+  return {
+    items: items.map((item, i) => (i === counterpartIdx ? merged : item)),
+    consumed: true,
+  };
+};
+
 export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: number, pageUrl?: string) => {
   if (!candidate.url) return;
 
@@ -404,6 +453,58 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
 
   const tabKey = tabId !== undefined ? String(tabId) : 'unknown';
   let current = await getTabItems(tabKey);
+  const normalizedCandidate = normalizeDetection(candidate, tabId, pageUrl);
+
+  // A provider extractor that supplies a complete variants list is the
+  // authority for that page's player. Its signed CDN URLs change on refresh,
+  // so URL-only dedup would leave an old item beside the new one. Replace any
+  // prior authority for the same page and suppress lower-level network/MSE
+  // evidence once the authoritative item exists.
+  if (isVariantAuthority(normalizedCandidate)) {
+    const counterpart = current.find(item => sameMainPlayerSession(item, normalizedCandidate));
+    const replacement = counterpart
+      ? {
+          ...normalizedCandidate,
+          id: counterpart.id,
+          thumbnail: counterpart.thumbnail ?? normalizedCandidate.thumbnail,
+          duration: counterpart.duration ?? normalizedCandidate.duration,
+          detectedAt: Math.min(counterpart.detectedAt, normalizedCandidate.detectedAt),
+        }
+      : normalizedCandidate;
+    const remaining = current.filter(item => !sameMainPlayerSession(item, normalizedCandidate));
+    const updated = [replacement, ...remaining].slice(0, 50);
+    setTabItems(tabKey, updated);
+    if (tabId !== undefined) updateBadge(tabId, updated.length);
+    return;
+  }
+
+  const existingAuthority = current.find(
+    item => isVariantAuthority(item) && sameMainPlayerSession(item, normalizedCandidate),
+  );
+  if (
+    existingAuthority &&
+    (normalizedCandidate.source === 'network' ||
+      normalizedCandidate.kind === 'mse' ||
+      normalizedCandidate.kind === 'audio')
+  ) {
+    if (
+      normalizedCandidate.kind === 'mse' &&
+      ((normalizedCandidate.thumbnail && !existingAuthority.thumbnail) ||
+        (normalizedCandidate.duration && normalizedCandidate.duration !== existingAuthority.duration))
+    ) {
+      const updated = current.map(item =>
+        item.id === existingAuthority.id
+          ? {
+              ...item,
+              thumbnail: item.thumbnail ?? normalizedCandidate.thumbnail,
+              duration: normalizedCandidate.duration ?? item.duration,
+            }
+          : item,
+      );
+      setTabItems(tabKey, updated);
+    }
+    return;
+  }
 
   // Un-pair safety net: if this candidate's probe just revealed a real
   // resolution AND its URL is currently bound as another item's audioUrl, the
@@ -447,6 +548,12 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
   }
 
   const existingIdx = current.findIndex(item => item.url === candidate.url);
+  const mainPlayerReconciliation = reconcileMainPlayerEvidence(current, normalizedCandidate);
+  if (mainPlayerReconciliation.consumed) {
+    setTabItems(tabKey, mainPlayerReconciliation.items);
+    if (tabId !== undefined) updateBadge(tabId, mainPlayerReconciliation.items.length);
+    return;
+  }
 
   if (existingIdx !== -1) {
     // Patch existing entry with richer data (thumbnail, duration, variants) if we now have it
@@ -599,7 +706,7 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
   }
 
   const seenSet = ensureSeenCache(tabId);
-  const normalized = normalizeDetection(candidate, tabId, pageUrl);
+  const normalized = normalizedCandidate;
   // When an HLS/DASH/MSS manifest arrives, drop any pre-existing video/audio/MSE
   // entries for this tab — they are almost certainly player-side requests or the
   // MediaSource shell for the same stream (Instagram, for example, fires
@@ -764,6 +871,7 @@ export const clearTabDetections = async (tabId: number) => {
   }
   seenUrlsByTab.delete(tabId);
   seenHlsMasterDirsByTab.delete(tabId);
+  clearFmp4RangeDetectionsForTab(tabId);
   tabsWithMainVideo.delete(tabId);
   const pendingBadge = badgeTimers.get(tabId);
   if (pendingBadge) {
@@ -785,35 +893,47 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
   const contentLengthHeader = details.responseHeaders?.find(h => h.name.toLowerCase() === 'content-length')?.value;
   const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
 
-  // ── Skip YouTube CDN: per CWS content policies, the extension must not
-  //    facilitate downloading copyrighted content from YouTube. Drop any
-  //    googlevideo.com (or YT-domain) media so it never surfaces in the UI.
-  try {
-    const urlObj = new URL(url);
-    const host = urlObj.hostname;
-    if (host.endsWith('.googlevideo.com') || host === 'youtube.com' || host.endsWith('.youtube.com')) {
-      return;
+  // Use actual tab URL (details.initiator is only the scheme+host, not the full path).
+  let pageUrl = details.initiator;
+  if (tabId !== undefined && tabId >= 0) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.url) pageUrl = tab.url;
+    } catch {
+      // tab may not exist
     }
-  } catch {
-    // ignore malformed URLs
   }
+
+  const fmp4 = await handleFmp4RangeDetection({
+    url,
+    tabId,
+    pageUrl,
+    responseHeaders: details.responseHeaders,
+    requestHeaders: findCapturedHeaders(url, undefined, tabId),
+    mimeType: contentType,
+  });
+  if (fmp4.candidate) await upsertDetection(fmp4.candidate, tabId, pageUrl);
+  if (fmp4.handled) return;
 
   const kind = deriveKind(url, contentType);
   if (kind === 'other') return;
   if (isHlsSegment(url, contentType)) return;
-  if (isDashSegment(url, contentType)) return;
 
-  // Skip small payloads for direct media (not manifests) — avoids tracker noise
-  if ((kind === 'video' || kind === 'audio') && contentLength !== undefined && contentLength < MIN_MEDIA_SIZE_BYTES) {
+  if (isDashSegment(url, contentType)) {
+    const dashFmp4 = await handleFmp4RangeDetection({
+      url,
+      tabId,
+      pageUrl,
+      responseHeaders: details.responseHeaders,
+      requestHeaders: findCapturedHeaders(url, undefined, tabId),
+      mimeType: contentType,
+    });
+    if (dashFmp4.candidate) await upsertDetection(dashFmp4.candidate, tabId, pageUrl);
     return;
   }
 
-  // Listing-page gate: progressive video/audio requests on a tab with no
-  // rendered main-video element are preloads (Instagram saved-posts grid,
-  // TikTok feed, YouTube homepage) — not something the user is watching.
-  // Manifests (HLS/DASH) bypass the gate: they're the primary artifact and
-  // rarely fire on listing pages.
-  if ((kind === 'video' || kind === 'audio') && tabId !== undefined && tabId >= 0 && !tabsWithMainVideo.has(tabId)) {
+  // Skip small payloads for direct media (not manifests) — avoids tracker noise
+  if ((kind === 'video' || kind === 'audio') && contentLength !== undefined && contentLength < MIN_MEDIA_SIZE_BYTES) {
     return;
   }
 
@@ -862,17 +982,6 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
         const bBw = b.bandwidth ?? 0;
         return bBw - aBw;
       });
-    }
-  }
-
-  // Use actual tab URL (details.initiator is only the scheme+host, not the full path).
-  let pageUrl = details.initiator;
-  if (tabId !== undefined && tabId >= 0) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.url) pageUrl = tab.url;
-    } catch {
-      // tab may not exist
     }
   }
 

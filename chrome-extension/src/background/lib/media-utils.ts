@@ -41,8 +41,18 @@ export const SUBTITLE_EXTS = new Set(['.vtt', '.srt', '.ttml', '.dfxp']);
 export const deriveKind = (url: string, mime?: string): MediaKind => {
   const normalizedMime = mime?.toLowerCase() ?? '';
   const ext = getPathExtension(url);
+  const queryMime = (() => {
+    try {
+      return new URL(url).searchParams.get('mime')?.toLowerCase() ?? '';
+    } catch {
+      return '';
+    }
+  })();
 
   if (normalizedMime.includes('application/vnd.apple.mpegurl') || normalizedMime.includes('application/x-mpegurl')) {
+    return 'hls';
+  }
+  if (queryMime.includes('application/vnd.apple.mpegurl') || queryMime.includes('application/x-mpegurl')) {
     return 'hls';
   }
   if (ext === '.m3u8') {
@@ -51,10 +61,16 @@ export const deriveKind = (url: string, mime?: string): MediaKind => {
   if (normalizedMime.includes('application/dash+xml')) {
     return 'dash';
   }
+  if (queryMime.includes('application/dash+xml')) {
+    return 'dash';
+  }
   if (ext === '.mpd') {
     return 'dash';
   }
   if (normalizedMime.includes('application/vnd.ms-sstr+xml')) {
+    return 'mss';
+  }
+  if (queryMime.includes('application/vnd.ms-sstr+xml')) {
     return 'mss';
   }
   if (/\.ism\/manifest(\?|$)/i.test(url)) {
@@ -73,7 +89,13 @@ export const deriveKind = (url: string, mime?: string): MediaKind => {
   if (normalizedMime.startsWith('video/')) {
     return 'video';
   }
+  if (queryMime.startsWith('video/')) {
+    return 'video';
+  }
   if (normalizedMime.startsWith('audio/')) {
+    return 'audio';
+  }
+  if (queryMime.startsWith('audio/')) {
     return 'audio';
   }
   if (VIDEO_EXTS.has(ext)) {

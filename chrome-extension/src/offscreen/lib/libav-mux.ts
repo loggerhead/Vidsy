@@ -2,7 +2,7 @@
 // merged). Consolidates the auth-fallback decision and the OPFS→jsfetch
 // input conversion so every strategy branches the same way.
 //
-// DNR note: the dynamic rule at background/lib/header-capture.ts omits
+// DNR note: the session rule at background/lib/header-capture.ts omits
 // `resourceTypes`, which in MV3 matches every resource type except
 // main_frame — so libav's worker-origin fetch (`xmlhttprequest`) is
 // already header-injected by the existing DNR writer. No DNR change

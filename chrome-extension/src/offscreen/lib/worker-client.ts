@@ -2,6 +2,7 @@
 // The worker owns OPFS. This module is the only place that speaks the worker protocol.
 
 import { updateProgress } from './progress';
+import { rejectPendingWorkerJobs } from './pending-worker-jobs';
 import type {
   FetchRangesRequest,
   FetchSegmentsRequest,
@@ -12,6 +13,7 @@ import type {
   WorkerRequest,
   WorkerResponse,
 } from '../download_worker/messages';
+import type { ExecutableMuxPlan, PlanInput } from './media-processing';
 import type { ChunkProgress } from '@extension/shared';
 
 // Storage is dynamically imported so its module-level createStorage calls
@@ -35,6 +37,8 @@ const nextJobId = (): string => `j${++jobCounter}_${Date.now().toString(36)}`;
 type PendingJob = {
   resolve: (totalBytes: number) => void;
   reject: (err: Error) => void;
+  onProgress?: (progress: ProgressUpdate) => void;
+  reportProgress: boolean;
 };
 type PendingFile = {
   resolve: (file: File) => void;
@@ -54,84 +58,100 @@ const pendingFile = new Map<string, PendingFile>();
 const pendingAck = new Map<string, PendingAck>();
 const pendingMux = new Map<string, PendingMux>();
 
-const ensureListener = (() => {
-  let attached = false;
-  return (): void => {
-    if (attached) return;
-    attached = true;
-    getWorker().addEventListener('message', (ev: MessageEvent<WorkerResponse>) => {
-      const msg = ev.data;
-      switch (msg.type) {
-        case 'progress': {
-          const { jobKey, stage, downloadedBytes, estimatedBytes, muxPercent, chunks } = msg as ProgressUpdate;
+const rejectAllPending = (error: Error): void => {
+  rejectPendingWorkerJobs(error, [pendingFetch, pendingFile, pendingAck, pendingMux]);
+  worker = null;
+};
+
+let listenerWorker: Worker | null = null;
+const ensureListener = (): void => {
+  const activeWorker = getWorker();
+  if (listenerWorker === activeWorker) return;
+  listenerWorker = activeWorker;
+  activeWorker.addEventListener('message', (ev: MessageEvent<WorkerResponse>) => {
+    const msg = ev.data;
+    switch (msg.type) {
+      case 'progress': {
+        const { jobKey, stage, downloadedBytes, estimatedBytes, muxPercent, chunks } = msg as ProgressUpdate;
+        const pending = pendingFetch.get(msg.jobId);
+        pending?.onProgress?.(msg);
+        if (pending?.reportProgress !== false) {
           void updateProgress(jobKey, { stage, downloadedBytes, estimatedBytes, muxPercent, chunks });
-          return;
         }
-        case 'fetch-done': {
-          const p = pendingFetch.get(msg.jobId);
-          if (p) {
-            pendingFetch.delete(msg.jobId);
-            p.resolve(msg.totalBytes);
-          }
-          return;
-        }
-        case 'mux-done': {
-          const p = pendingMux.get(msg.jobId);
-          if (p) {
-            pendingMux.delete(msg.jobId);
-            p.resolve({ outputOpfsName: msg.outputOpfsName, totalBytes: msg.totalBytes });
-          }
-          return;
-        }
-        case 'get-file-done': {
-          const p = pendingFile.get(msg.jobId);
-          if (p) {
-            pendingFile.delete(msg.jobId);
-            p.resolve(msg.file);
-          }
-          return;
-        }
-        case 'remove-done': {
-          const p = pendingAck.get(msg.jobId);
-          if (p) {
-            pendingAck.delete(msg.jobId);
-            p.resolve();
-          }
-          return;
-        }
-        case 'error': {
-          const err = new Error(msg.error);
-          const f = pendingFetch.get(msg.jobId);
-          if (f) {
-            pendingFetch.delete(msg.jobId);
-            f.reject(err);
-            return;
-          }
-          const g = pendingFile.get(msg.jobId);
-          if (g) {
-            pendingFile.delete(msg.jobId);
-            g.reject(err);
-            return;
-          }
-          const a = pendingAck.get(msg.jobId);
-          if (a) {
-            pendingAck.delete(msg.jobId);
-            a.reject(err);
-            return;
-          }
-          const m = pendingMux.get(msg.jobId);
-          if (m) {
-            pendingMux.delete(msg.jobId);
-            m.reject(err);
-          }
-          return;
-        }
-        case 'pong':
-          return;
+        return;
       }
-    });
-  };
-})();
+      case 'fetch-done': {
+        const p = pendingFetch.get(msg.jobId);
+        if (p) {
+          pendingFetch.delete(msg.jobId);
+          p.resolve(msg.totalBytes);
+        }
+        return;
+      }
+      case 'mux-done': {
+        const p = pendingMux.get(msg.jobId);
+        if (p) {
+          pendingMux.delete(msg.jobId);
+          p.resolve({ outputOpfsName: msg.outputOpfsName, totalBytes: msg.totalBytes });
+        }
+        return;
+      }
+      case 'get-file-done': {
+        const p = pendingFile.get(msg.jobId);
+        if (p) {
+          pendingFile.delete(msg.jobId);
+          p.resolve(msg.file);
+        }
+        return;
+      }
+      case 'remove-done': {
+        const p = pendingAck.get(msg.jobId);
+        if (p) {
+          pendingAck.delete(msg.jobId);
+          p.resolve();
+        }
+        return;
+      }
+      case 'error': {
+        const err = new Error(msg.error);
+        const f = pendingFetch.get(msg.jobId);
+        if (f) {
+          pendingFetch.delete(msg.jobId);
+          f.reject(err);
+          return;
+        }
+        const g = pendingFile.get(msg.jobId);
+        if (g) {
+          pendingFile.delete(msg.jobId);
+          g.reject(err);
+          return;
+        }
+        const a = pendingAck.get(msg.jobId);
+        if (a) {
+          pendingAck.delete(msg.jobId);
+          a.reject(err);
+          return;
+        }
+        const m = pendingMux.get(msg.jobId);
+        if (m) {
+          pendingMux.delete(msg.jobId);
+          m.reject(err);
+        }
+        return;
+      }
+      case 'pong':
+        return;
+    }
+  });
+  activeWorker.addEventListener('error', event => {
+    listenerWorker = null;
+    rejectAllPending(new Error(event.message || 'Download worker terminated unexpectedly'));
+  });
+  activeWorker.addEventListener('messageerror', () => {
+    listenerWorker = null;
+    rejectAllPending(new Error('Download worker returned an unreadable message'));
+  });
+};
 
 const send = (req: WorkerRequest): void => {
   ensureListener();
@@ -151,6 +171,7 @@ const fetchSegmentsToOpfs = (args: {
     pendingFetch.set(jobId, {
       resolve: totalBytes => resolve({ opfsName: args.opfsName, totalBytes }),
       reject,
+      reportProgress: true,
     });
     const req: FetchSegmentsRequest = { type: 'fetch-segments', jobId, ...args };
     send(req);
@@ -203,16 +224,33 @@ const fetchRangesToOpfs = (args: {
   ranges: { start: number; end: number }[];
   totalBytes: number;
   stage: 'download-video' | 'download-audio';
+  maxConnections?: number;
+  onProgress?: (progress: ProgressUpdate) => void;
+  reportProgress?: boolean;
 }): Promise<{ opfsName: string; totalBytes: number }> =>
   new Promise((resolve, reject) => {
     const jobId = nextJobId();
     pendingFetch.set(jobId, {
       resolve: totalBytes => resolve({ opfsName: args.opfsName, totalBytes }),
       reject,
+      onProgress: args.onProgress,
+      reportProgress: args.reportProgress !== false,
     });
     void Promise.all([findResumeChunks(args.jobKey, args.ranges, args.totalBytes), readMaxConnections()]).then(
-      ([resumeChunks, maxConnections]) => {
-        const req: FetchRangesRequest = { type: 'fetch-ranges', jobId, ...args, resumeChunks, maxConnections };
+      ([resumeChunks, configuredMaxConnections]) => {
+        const maxConnections = Math.max(1, Math.min(16, Math.floor(args.maxConnections ?? configuredMaxConnections)));
+        const req: FetchRangesRequest = {
+          type: 'fetch-ranges',
+          jobId,
+          jobKey: args.jobKey,
+          opfsName: args.opfsName,
+          url: args.url,
+          ranges: args.ranges,
+          totalBytes: args.totalBytes,
+          stage: args.stage,
+          resumeChunks,
+          maxConnections,
+        };
         send(req);
       },
     );
@@ -223,14 +261,25 @@ const fetchUrlToOpfs = (args: {
   opfsName: string;
   url: string;
   stage: 'download-video' | 'download-audio';
+  onProgress?: (progress: ProgressUpdate) => void;
+  reportProgress?: boolean;
 }): Promise<{ opfsName: string; totalBytes: number }> =>
   new Promise((resolve, reject) => {
     const jobId = nextJobId();
     pendingFetch.set(jobId, {
       resolve: totalBytes => resolve({ opfsName: args.opfsName, totalBytes }),
       reject,
+      onProgress: args.onProgress,
+      reportProgress: args.reportProgress !== false,
     });
-    const req: FetchUrlRequest = { type: 'fetch-url', jobId, ...args };
+    const req: FetchUrlRequest = {
+      type: 'fetch-url',
+      jobId,
+      jobKey: args.jobKey,
+      opfsName: args.opfsName,
+      url: args.url,
+      stage: args.stage,
+    };
     send(req);
   });
 
@@ -263,7 +312,8 @@ const cancelWorkerJob = (jobKey: string): void => {
 const muxInWorker = (args: {
   jobKey: string;
   outputOpfsName: string;
-  ffmpegArgs: string[];
+  plan: ExecutableMuxPlan;
+  input: PlanInput;
   durationSeconds?: number;
   estimatedBytes?: number;
 }): Promise<{ outputOpfsName: string; totalBytes: number }> =>
@@ -275,7 +325,8 @@ const muxInWorker = (args: {
       jobId,
       jobKey: args.jobKey,
       outputOpfsName: args.outputOpfsName,
-      ffmpegArgs: args.ffmpegArgs,
+      plan: args.plan,
+      input: args.input,
       stage: 'mux',
       durationSeconds: args.durationSeconds,
       estimatedBytes: args.estimatedBytes,
@@ -292,4 +343,5 @@ export {
   removeOpfs,
   cancelWorkerJob,
   muxInWorker,
+  readMaxConnections,
 };

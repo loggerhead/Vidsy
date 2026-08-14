@@ -1,5 +1,8 @@
-import { registerOutputForCleanup } from './blob-cleanup';
 import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
+import { describeDirectFile } from './media-descriptor';
+import { executeMuxPlan, requireExecutablePlan } from './media-executor';
+import { planMediaProcessing } from './media-processing';
+import { prepareOutputDelivery } from './output-delivery';
 import { updateProgress, clearProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
 import {
@@ -7,9 +10,10 @@ import {
   fetchRangesToOpfs,
   fetchUrlToOpfs,
   getOpfsFile,
-  muxInWorker,
+  readMaxConnections,
   removeOpfs,
 } from './worker-client';
+import type { ProgressUpdate } from '../download_worker/messages';
 
 const MIN_SIZE_FOR_PARALLEL = 5 * 1024 * 1024; // 5 MB
 const TARGET_CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per range request
@@ -22,14 +26,11 @@ type RangeProbe = {
   contentType: string;
 };
 
-const extFromContentType = (contentType: string): string => {
-  if (contentType.includes('webm')) return '.webm';
-  if (contentType.includes('mp3') || contentType.includes('mpeg')) return '.mp3';
-  if (contentType.includes('ogg')) return '.ogg';
-  if (contentType.includes('m4a')) return '.m4a';
-  if (contentType.includes('wav')) return '.wav';
-  if (contentType.includes('flac')) return '.flac';
-  return '.mp4';
+type DownloadTransport = {
+  mode: 'range' | 'stream';
+  connectionLimit: number;
+  totalBytes?: number;
+  fallbackReason?: string;
 };
 
 const probeRangeSupport = async (url: string, signal: AbortSignal): Promise<RangeProbe> => {
@@ -79,36 +80,30 @@ const computeRanges = (totalBytes: number): { start: number; end: number }[] => 
 const opfsNameFor = (key: string, tag: string, ext: string): string =>
   `http-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}-${tag}.${ext}`;
 
-const mp3TranscodeArgs = (input: string, output: string): string[] => [
-  '-i',
-  input,
-  '-vn',
-  '-c:a',
-  'libmp3lame',
-  '-q:a',
-  '2',
-  '-y',
-  output,
-];
-
 // Download a URL into OPFS, returning the resulting File + resolved content-type.
 // Picks Range-parallel when the server supports it and the payload is large enough,
 // with the streaming fallback routed through the same worker.
-export const downloadUrlToOpfs = async (args: {
+const downloadUrlToOpfs = async (args: {
   url: string;
   jobKey: string;
   opfsName: string;
   stage: 'download-video' | 'download-audio';
   signal: AbortSignal;
-}): Promise<{ file: File; contentType: string; totalBytes: number }> => {
+  maxConnections?: number;
+  reportProgress?: boolean;
+  onProgress?: (progress: ProgressUpdate) => void;
+  onTransport?: (transport: DownloadTransport) => void | Promise<void>;
+}): Promise<{ file: File; contentType: string; totalBytes: number; transport: DownloadTransport }> => {
   const { url, jobKey, opfsName, stage, signal } = args;
 
   let probe: RangeProbe | null = null;
+  let fallbackReason: string | undefined;
   try {
     probe = await probeRangeSupport(url, signal);
   } catch (err) {
     if (signal.aborted) throw err;
     probe = null;
+    fallbackReason = err instanceof Error ? `Range probe failed: ${err.message}` : 'Range probe failed';
   }
 
   const canParallelize =
@@ -117,6 +112,10 @@ export const downloadUrlToOpfs = async (args: {
   if (canParallelize && probe?.totalBytes) {
     try {
       const ranges = computeRanges(probe.totalBytes);
+      const configuredConnections = args.maxConnections ?? (await readMaxConnections());
+      const connectionLimit = Math.max(1, Math.min(configuredConnections, ranges.length));
+      const transport: DownloadTransport = { mode: 'range', connectionLimit, totalBytes: probe.totalBytes };
+      await args.onTransport?.(transport);
       const { totalBytes } = await fetchRangesToOpfs({
         jobKey,
         opfsName,
@@ -124,23 +123,45 @@ export const downloadUrlToOpfs = async (args: {
         ranges,
         totalBytes: probe.totalBytes,
         stage,
+        maxConnections: connectionLimit,
+        reportProgress: args.reportProgress,
+        onProgress: args.onProgress,
       });
       const file = await getOpfsFile(opfsName);
-      return { file, contentType: probe.contentType, totalBytes };
+      return { file, contentType: probe.contentType, totalBytes, transport };
     } catch (err) {
       if (signal.aborted) throw err;
       // Range-parallel failed; fall back to streaming.
+      fallbackReason = err instanceof Error ? `Parallel ranges failed: ${err.message}` : 'Parallel ranges failed';
       try {
         await removeOpfs(opfsName);
       } catch {
         /* ignore */
       }
     }
+  } else if (!fallbackReason) {
+    if (!probe?.supportsRange) fallbackReason = 'Server did not accept byte ranges';
+    else if (probe.totalBytes === undefined) fallbackReason = 'Server did not report the file size';
+    else fallbackReason = 'File is smaller than 5 MB';
   }
 
-  const { totalBytes } = await fetchUrlToOpfs({ jobKey, opfsName, url, stage });
+  const transport: DownloadTransport = {
+    mode: 'stream',
+    connectionLimit: 1,
+    totalBytes: probe?.totalBytes,
+    fallbackReason,
+  };
+  await args.onTransport?.(transport);
+  const { totalBytes } = await fetchUrlToOpfs({
+    jobKey,
+    opfsName,
+    url,
+    stage,
+    reportProgress: args.reportProgress,
+    onProgress: args.onProgress,
+  });
   const file = await getOpfsFile(opfsName);
-  return { file, contentType: probe?.contentType ?? '', totalBytes };
+  return { file, contentType: probe?.contentType ?? '', totalBytes, transport };
 };
 
 /**
@@ -148,11 +169,11 @@ export const downloadUrlToOpfs = async (args: {
  * hands the disk-backed File to chrome.downloads (MP4) or transcodes in-place
  * through libav+OPFS (MP3). Peak JS heap stays near zero regardless of size.
  */
-export const downloadHttpDirect = async (
+const downloadHttpDirect = async (
   url: string,
   key: string,
   output: 'mp4' | 'mp3' = 'mp4',
-): Promise<{ blobUrl: string; ext: string }> => {
+): ReturnType<typeof prepareOutputDelivery> => {
   const abortController = new AbortController();
   activeAbortControllers.set(key, abortController);
   abortController.signal.addEventListener('abort', () => cancelWorkerJob(key));
@@ -166,7 +187,6 @@ export const downloadHttpDirect = async (
 
     const {
       file: inputFile,
-      contentType,
       totalBytes,
     } = await downloadUrlToOpfs({
       url,
@@ -174,17 +194,31 @@ export const downloadHttpDirect = async (
       opfsName: inputOpfsName,
       stage: 'download-video',
       signal: abortController.signal,
+      onTransport: value =>
+        updateProgress(key, {
+          stage: 'download-video',
+          downloadedBytes: 0,
+          transferMode: value.mode,
+          activeConnections: value.connectionLimit,
+          connectionLimit: value.connectionLimit,
+          fallbackReason: value.fallbackReason,
+        }),
     });
 
-    if (output === 'mp3') {
+    const descriptor = await describeDirectFile(inputFile, 'direct');
+    const plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
+
+    if (plan.type !== 'passthrough') {
+      if (plan.type === 'concatenate-fmp4') throw new Error('Unexpected concatenate plan for direct media');
       await preflightDiskSpace(totalBytes);
-      outputOpfsName = opfsNameFor(key, 'out', 'mp3');
+      outputOpfsName = opfsNameFor(key, 'out', plan.output.container);
       const { jsfetchUrl, blobUrl } = await jsfetchInputForOpfs(inputOpfsName);
       inputBlobUrl = blobUrl;
-      await muxInWorker({
+      await executeMuxPlan({
         jobKey: key,
         outputOpfsName,
-        ffmpegArgs: mp3TranscodeArgs(jsfetchUrl, outputOpfsName),
+        plan,
+        input: { urls: [jsfetchUrl] },
         estimatedBytes: totalBytes,
       });
       URL.revokeObjectURL(inputBlobUrl);
@@ -192,17 +226,15 @@ export const downloadHttpDirect = async (
       void removeOpfs(inputOpfsName).catch(() => undefined);
 
       const outputFile = await getOpfsFile(outputOpfsName);
-      const outputBlobUrl = URL.createObjectURL(outputFile);
-      registerOutputForCleanup(outputBlobUrl, outputOpfsName);
+      const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
       await clearProgress(key);
-      return { blobUrl: outputBlobUrl, ext: '.mp3' };
+      return delivery;
     }
 
-    const blobUrl = URL.createObjectURL(inputFile);
     outputOpfsName = inputOpfsName;
-    registerOutputForCleanup(blobUrl, outputOpfsName);
+    const delivery = await prepareOutputDelivery({ file: inputFile, opfsName: outputOpfsName, plan });
     await clearProgress(key);
-    return { blobUrl, ext: extFromContentType(contentType) };
+    return delivery;
   } catch (err) {
     if (inputBlobUrl) {
       try {
@@ -223,3 +255,6 @@ export const downloadHttpDirect = async (
     }
   }
 };
+
+export { downloadHttpDirect, downloadUrlToOpfs };
+export type { DownloadTransport };
