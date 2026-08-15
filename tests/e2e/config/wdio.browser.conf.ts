@@ -6,7 +6,10 @@ import { extname, join, resolve } from 'node:path';
 
 const extName = IS_FIREFOX ? '.xpi' : '.zip';
 const extensions = await readdir(join(import.meta.dirname, '../../../dist-zip'));
-const latestExtension = extensions.filter(file => extname(file) === extName).at(-1);
+const latestExtension = extensions
+  .filter(file => extname(file) === extName)
+  .sort()
+  .at(-1);
 const extPath = join(import.meta.dirname, `../../../dist-zip/${latestExtension}`);
 const bundledExtension = (await readFile(extPath)).toString('base64');
 const downloadDirectory = resolve(
@@ -15,8 +18,10 @@ const downloadDirectory = resolve(
 
 const chromeCapabilities = {
   browserName: 'chrome',
+  pageLoadStrategy: 'eager' as const,
   acceptInsecureCerts: true,
   'goog:chromeOptions': {
+    ...(process.env.VIDSY_E2E_CHROME_BINARY ? { binary: process.env.VIDSY_E2E_CHROME_BINARY } : {}),
     args: [
       '--disable-web-security',
       '--disable-gpu',
@@ -45,6 +50,10 @@ const firefoxCapabilities = {
 
 export const config: WebdriverIO.Config = {
   ...baseConfig,
+  mochaOpts: {
+    ...baseConfig.mochaOpts,
+    timeout: process.env.VIDSY_LIVE_DOWNLOAD_E2E === 'true' ? 20 * 60 * 1000 : baseConfig.mochaOpts?.timeout,
+  },
   capabilities: IS_FIREFOX ? [firefoxCapabilities] : [chromeCapabilities],
 
   maxInstances: IS_CI ? 10 : 1,

@@ -48,9 +48,38 @@ describe('Live media downloads', function () {
       this.timeout(20 * 60 * 1000);
       const before = await files();
       await browser.url(site.url);
-      const downloadButton = await $('button*=Download best quality').getElement();
-      await downloadButton.waitForDisplayed({ timeout: 120000 });
-      await downloadButton.click();
+      try {
+        await browser.waitUntil(
+          async () =>
+            browser.execute(() => {
+              const host = document.querySelector('#CEB-extension-all');
+              return Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).some(button =>
+                button.textContent?.includes('Download'),
+              );
+            }),
+          { timeout: 120000, interval: 1000, timeoutMsg: 'No Download button found in content UI shadow root' },
+        );
+      } catch (error) {
+        const diagnostic = await browser.execute(() => ({
+          url: location.href,
+          title: document.title,
+          text: (document.body?.innerText ?? '').slice(0, 2000),
+          buttons: Array.from(document.querySelectorAll('button'))
+            .map(button => button.innerText)
+            .slice(0, 30),
+        }));
+        throw new Error(`${site.name} download control unavailable: ${JSON.stringify(diagnostic)}; ${String(error)}`);
+      }
+      const clicked = await browser.execute(() => {
+        const host = document.querySelector('#CEB-extension-all');
+        const button = Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).find(element =>
+          element.textContent?.includes('Download'),
+        );
+        if (!button) return false;
+        button.click();
+        return true;
+      });
+      expect(clicked).toBe(true);
       const downloaded = await waitForCompletedFile(before);
       const info = await stat(join(downloadDirectory!, downloaded));
       expect(info.size).toBeGreaterThan(minimumBytes);
