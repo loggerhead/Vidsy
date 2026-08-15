@@ -2,13 +2,16 @@ import { config as baseConfig } from './wdio.conf.js';
 import { getChromeExtensionPath, getFirefoxExtensionPath } from '../utils/extension-path.js';
 import { IS_CI, IS_FIREFOX } from '@extension/env';
 import { readdir, readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { extname, join, resolve } from 'node:path';
 
 const extName = IS_FIREFOX ? '.xpi' : '.zip';
 const extensions = await readdir(join(import.meta.dirname, '../../../dist-zip'));
 const latestExtension = extensions.filter(file => extname(file) === extName).at(-1);
 const extPath = join(import.meta.dirname, `../../../dist-zip/${latestExtension}`);
 const bundledExtension = (await readFile(extPath)).toString('base64');
+const downloadDirectory = resolve(
+  process.env.VIDSY_E2E_DOWNLOAD_DIR ?? join(import.meta.dirname, '../../../.e2e-downloads'),
+);
 
 const chromeCapabilities = {
   browserName: 'chrome',
@@ -21,7 +24,13 @@ const chromeCapabilities = {
       '--disable-dev-shm-usage',
       ...(IS_CI ? ['--headless'] : []),
     ],
-    prefs: { 'extensions.ui.developer_mode': true },
+    prefs: {
+      'extensions.ui.developer_mode': true,
+      'download.default_directory': downloadDirectory,
+      'download.prompt_for_download': false,
+      'download.directory_upgrade': true,
+      'safebrowsing.enabled': true,
+    },
     extensions: [bundledExtension],
   },
 };
