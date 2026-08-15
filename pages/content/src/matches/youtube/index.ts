@@ -1,3 +1,4 @@
+import { extractYouTubeMedia } from './player-formats';
 import { MEDIA_MESSAGE } from '@extension/shared';
 import { createBridge, onFromMain, sendToMain } from '@src/lib/broadcast-bridge';
 import type { MediaVariant, SubtitleTrack } from '@extension/shared';
@@ -76,17 +77,6 @@ const getVideoId = () => {
   return shortsMatch?.[1];
 };
 
-const codecsFromMimeType = (mimeType?: string) => mimeType?.match(/codecs="([^"]+)"/)?.[1];
-
-const sortVideoFormats = (formats: YTFormat[]) =>
-  formats.slice().sort((a, b) => {
-    const heightDiff = (b.height ?? 0) - (a.height ?? 0);
-    if (heightDiff !== 0) return heightDiff;
-    const widthDiff = (b.width ?? 0) - (a.width ?? 0);
-    if (widthDiff !== 0) return widthDiff;
-    return (b.bitrate ?? 0) - (a.bitrate ?? 0);
-  });
-
 const extractCaptionTracks = (pr: PlayerResponse): SubtitleTrack[] => {
   const tracks = pr.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
   const out: SubtitleTrack[] = [];
@@ -160,31 +150,11 @@ const extractFormats = (pr: PlayerResponse) => {
     return sentCount;
   }
 
-  const adaptive = (streamingData.adaptiveFormats ?? []).filter(f => !!f.url);
-  const videoOnly = adaptive.filter(f => f.mimeType?.startsWith('video/mp4'));
-  const audioOnly = adaptive.filter(f => f.mimeType?.startsWith('audio/mp4'));
-  const bestAudio = audioOnly.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-  const progressive = (streamingData.formats ?? []).filter(fmt => !!fmt.url && fmt.mimeType?.startsWith('video/'));
-  const videoFormats = sortVideoFormats([...progressive, ...videoOnly]);
-  const variants: MediaVariant[] = videoFormats.map(fmt => {
-    const isAdaptive = videoOnly.includes(fmt);
-    return {
-      url: fmt.url!,
-      name: fmt.qualityLabel ?? (fmt.height ? `${fmt.height}p` : undefined),
-      mimeType: fmt.mimeType,
-      bandwidth: fmt.bitrate,
-      resolution: fmt.width && fmt.height ? { width: fmt.width, height: fmt.height } : undefined,
-      frameRate: fmt.fps,
-      contentLength: fmt.contentLength ? Number(fmt.contentLength) : undefined,
-      codecs: codecsFromMimeType(fmt.mimeType),
-      audioUrl: isAdaptive ? bestAudio?.url : undefined,
-      audioMimeType: isAdaptive ? bestAudio?.mimeType : undefined,
-    };
-  });
-  const primary = videoFormats[0];
+  const media = extractYouTubeMedia(pr);
+  const primary = media?.primary;
 
-  if (primary?.url) {
-    const isAdaptive = videoOnly.includes(primary);
+  if (primary?.url && media) {
+    const primaryVariant = media.variants.find(variant => variant.url === primary.url);
     if (
       sendCandidate({
         url: primary.url,
@@ -193,10 +163,10 @@ const extractFormats = (pr: PlayerResponse) => {
         title,
         resolution: primary.width && primary.height ? { width: primary.width, height: primary.height } : undefined,
         contentLength: primary.contentLength ? Number(primary.contentLength) : undefined,
-        audioUrl: isAdaptive ? bestAudio?.url : undefined,
-        audioMimeType: isAdaptive ? bestAudio?.mimeType : undefined,
+        audioUrl: primaryVariant?.audioUrl,
+        audioMimeType: primaryVariant?.audioMimeType,
         subtitles: subs,
-        variants,
+        variants: media.variants,
       })
     )
       sentCount += 1;

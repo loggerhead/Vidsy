@@ -2,12 +2,13 @@ import { DropdownPanel } from './components/DropdownPanel';
 import { InterceptModal } from './components/InterceptModal';
 import { PillBar } from './components/PillBar';
 import { FONT } from './components/tokens';
+import { buildDownloadMessage } from './lib/download-request';
 import { ACTIVE_STAGES, pickBestVariant, qLabel, buildRows } from './lib/media-helpers';
 import { MEDIA_MESSAGE, useStorage } from '@extension/shared';
 import { mediaDetectionsStorage, mediaDownloadsStorage, mediaSettingsStorage } from '@extension/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VideoEntry } from './lib/media-helpers';
-import type { MediaDownloadProgress, MediaItem } from '@extension/shared';
+import type { MediaDownloadProgress, MediaItem, MediaVariant } from '@extension/shared';
 
 const App = () => {
   const detections = useStorage(mediaDetectionsStorage);
@@ -122,26 +123,13 @@ const App = () => {
 
   /* download helpers */
   const doDownload = useCallback(
-    async (item: MediaItem, variantUrl?: string) => {
+    async (item: MediaItem, variant?: MediaVariant) => {
       // MSE-fed players have no fetchable source — the badge still shows so the
       // user knows we saw the video, but the action is a no-op.
       if (item.kind === 'mse') return;
-      const url = variantUrl ?? item.url;
       setBusyUrl(item.url);
       setOpen(false);
-      const fmt = item.kind === 'audio' ? 'mp3' : 'mp4';
-      await chrome.runtime.sendMessage({
-        type: MEDIA_MESSAGE.DOWNLOAD,
-        payload: {
-          url,
-          key: item.url,
-          kind: item.kind,
-          fileName: item.fileName,
-          title: item.title,
-          tabId: tabId ?? undefined,
-          outputFormat: settings?.enableHlsMerging ? fmt : undefined,
-        },
-      });
+      await chrome.runtime.sendMessage(buildDownloadMessage(item, variant, tabId, settings?.enableHlsMerging));
       // Keep busyUrl until storage reports success/fail
     },
     [settings, tabId],
@@ -261,7 +249,7 @@ const App = () => {
             if (isBusy) {
               if (activeItem) doCancel(activeItem.url);
             } else {
-              doDownload(primary, bestUrl);
+              doDownload(primary, bestVariant);
             }
           }}
           onToggleOpen={() => setOpen(o => !o)}
@@ -272,7 +260,7 @@ const App = () => {
           <DropdownPanel
             rows={rows}
             primary={primary}
-            bestUrl={bestUrl}
+            bestVariant={bestVariant}
             bestQLabel={bestQLabel}
             onDownload={doDownload}
           />

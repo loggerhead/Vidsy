@@ -1,3 +1,4 @@
+import { isVariantAuthority, reconcilePlayerEvidence, sameMainPlayerSession } from './detection-evidence';
 import { handleFmp4RangeDetection, clearFmp4RangeDetectionsForTab } from './fmp4-range-detector';
 import { findCapturedHeaders } from './header-capture';
 import { parseHlsVariants, parseDashVariants } from './manifest-parser';
@@ -390,53 +391,6 @@ const normalizeDetection = (candidate: Partial<MediaItem>, tabId?: number, pageU
   };
 };
 
-const hasPairedAudio = (item: Pick<MediaItem, 'kind' | 'audioUrl' | 'variants'>): boolean =>
-  item.kind === 'video' && (!!item.audioUrl || !!item.variants?.some(v => v.audioUrl));
-
-const isVariantAuthority = (item: MediaItem): boolean =>
-  item.kind === 'video' && item.source === 'element' && !!item.variants?.length && hasPairedAudio(item);
-
-const sameMainPlayerSession = (a: MediaItem, b: MediaItem): boolean => {
-  if (!a.pageUrl || !b.pageUrl || a.pageUrl !== b.pageUrl) return false;
-  if (a.duration && b.duration && Math.abs(a.duration - b.duration) >= 2) return false;
-  return true;
-};
-
-const combineMseAndFetchable = (mse: MediaItem, fetchable: MediaItem): MediaItem => ({
-  ...mse,
-  ...fetchable,
-  id: mse.id,
-  title: mse.title ?? fetchable.title,
-  fileName: deriveFileName(fetchable.url, mse.title ?? fetchable.title),
-  thumbnail: mse.thumbnail ?? fetchable.thumbnail,
-  duration: mse.duration ?? fetchable.duration,
-  detectedAt: Math.min(mse.detectedAt, fetchable.detectedAt),
-});
-
-const reconcileMainPlayerEvidence = (
-  items: MediaItem[],
-  incoming: MediaItem,
-): { items: MediaItem[]; consumed: boolean } => {
-  if (incoming.kind !== 'mse' && !hasPairedAudio(incoming)) return { items, consumed: false };
-
-  const incomingIsMse = incoming.kind === 'mse';
-  const counterpartIdx = items.findIndex(item => {
-    if (!sameMainPlayerSession(item, incoming)) return false;
-    return incomingIsMse ? hasPairedAudio(item) : item.kind === 'mse';
-  });
-
-  if (counterpartIdx === -1) return { items, consumed: false };
-
-  const counterpart = items[counterpartIdx];
-  const merged = incomingIsMse
-    ? combineMseAndFetchable(incoming, counterpart)
-    : combineMseAndFetchable(counterpart, incoming);
-  return {
-    items: items.map((item, i) => (i === counterpartIdx ? merged : item)),
-    consumed: true,
-  };
-};
-
 export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: number, pageUrl?: string) => {
   if (!candidate.url) return;
 
@@ -548,7 +502,7 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
   }
 
   const existingIdx = current.findIndex(item => item.url === candidate.url);
-  const mainPlayerReconciliation = reconcileMainPlayerEvidence(current, normalizedCandidate);
+  const mainPlayerReconciliation = reconcilePlayerEvidence(current, normalizedCandidate);
   if (mainPlayerReconciliation.consumed) {
     setTabItems(tabKey, mainPlayerReconciliation.items);
     if (tabId !== undefined) updateBadge(tabId, mainPlayerReconciliation.items.length);

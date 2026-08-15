@@ -15,6 +15,7 @@
 // a blob: URL) and re-issued browser downloads bypass this listener via
 // URL prefix matching and a short-lived "recently resumed" allowlist.
 
+import { dlLog } from './logger';
 import { MEDIA_MESSAGE } from '@extension/shared';
 import { mediaSettingsStorage } from '@extension/storage';
 
@@ -166,10 +167,10 @@ const sendInterceptToTab = async (
   item: chrome.downloads.DownloadItem,
 ): Promise<void> => {
   if (!tab?.id) {
-    console.log('[Vidsy] no host tab available — modal cannot show');
+    dlLog('downloadInterceptor: no host tab available');
     return;
   }
-  console.log('[Vidsy] sending intercept modal to tab:', { id: tab.id, url: tab.url });
+  dlLog('downloadInterceptor: sending modal', { tabId: tab.id });
   try {
     if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
     if (tab.windowId !== undefined) {
@@ -196,7 +197,7 @@ const sendInterceptToTab = async (
       },
     });
   } catch (err) {
-    console.log('[Vidsy] sendMessage failed:', err);
+    dlLog('downloadInterceptor: sendMessage failed', err);
   }
 };
 
@@ -204,49 +205,43 @@ const sendInterceptToTab = async (
 // doesn't get a chance to render. The async tail (find tab + send modal)
 // runs after the cancel is in flight.
 const handleCreated = (item: chrome.downloads.DownloadItem): void => {
-  console.log('[Vidsy] downloads.onCreated:', {
-    id: item.id,
+  dlLog('downloadInterceptor: browser download created', {
+    downloadId: item.id,
     state: item.state,
-    url: item.url,
-    finalUrl: item.finalUrl,
     mime: item.mime,
-    filename: item.filename,
     fileSize: item.fileSize,
     totalBytes: item.totalBytes,
-    referrer: item.referrer,
   });
 
   if (item.state !== 'in_progress') {
-    console.log('[Vidsy] skip: state is', item.state);
+    dlLog('downloadInterceptor: skip non-active download', { state: item.state });
     return;
   }
 
   const url = item.finalUrl || item.url;
   if (isExtensionOriginUrl(url)) {
-    console.log('[Vidsy] skip: extension-origin url');
+    dlLog('downloadInterceptor: skip extension-origin URL');
     return;
   }
   if (shouldBypass(url)) {
-    console.log('[Vidsy] skip: recently resumed (5s bypass)');
+    dlLog('downloadInterceptor: skip recently resumed download');
     return;
   }
 
   // Setting is definitively OFF — skip.
   if (cachedEnabled === false) {
-    console.log('[Vidsy] skip: interceptor disabled');
+    dlLog('downloadInterceptor: skip while disabled');
     return;
   }
 
   if (!isMediaDownload(item)) {
-    console.log('[Vidsy] skip: not a media download (mime/ext mismatch)');
+    dlLog('downloadInterceptor: skip non-media download');
     return;
   }
 
-  console.log('[Vidsy] intercepting:', {
-    url,
+  dlLog('downloadInterceptor: intercepting', {
     mime: item.mime,
     fileSize: item.fileSize,
-    referrer: item.referrer,
     cachedEnabled,
   });
 
@@ -264,7 +259,7 @@ const handleCreated = (item: chrome.downloads.DownloadItem): void => {
     if (cachedEnabled === null) {
       const enabled = await readEnabled();
       if (!enabled) {
-        console.log('[Vidsy] cache loaded as disabled — resuming browser download');
+        dlLog('downloadInterceptor: cache disabled, resuming browser download');
         resumeBrowserDownload(url, item.filename ? item.filename.split('/').pop() : undefined);
         return;
       }

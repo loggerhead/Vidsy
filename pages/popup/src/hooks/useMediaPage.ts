@@ -1,3 +1,4 @@
+import { selectMediaPageTab } from './active-media-tab';
 import { MEDIA_MESSAGE, useStorage, pickBestVariant } from '@extension/shared';
 import {
   mediaDetectionsStorage,
@@ -49,8 +50,12 @@ export const useMediaPage = () => {
   const [editName, setEditName] = useState('');
 
   useEffect(() => {
-    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      setTabId(tab?.id ?? null);
+    void Promise.all([
+      chrome.tabs.query({ active: true, currentWindow: true }),
+      chrome.tabs.query({ active: true }),
+      chrome.tabs.query({}),
+    ]).then(([currentWindowTabs, activeTabs, allTabs]) => {
+      setTabId(selectMediaPageTab(currentWindowTabs, activeTabs, allTabs)?.id ?? null);
     });
   }, []);
 

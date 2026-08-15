@@ -1,9 +1,8 @@
 # Third-party components bundled in this extension
 
-The files `libav-6.8.8.0-h264-aac-mp3.wasm.wasm` and
-`libav-6.8.8.0-h264-aac-mp3.wasm.mjs` in this directory are an unmodified
-redistribution of a prebuilt WebAssembly artifact that bundles the following
-components:
+The files named `libav-6.8.8.0-web-media-remux-cli.*` in this directory are
+a reproducible WebAssembly build produced from the repository configuration
+in `tools/media-remux/`. They bundle the following components:
 
 ## Bundled components
 
@@ -17,16 +16,26 @@ components:
   Upstream: https://lame.sourceforge.io/
   Source: https://lame.sourceforge.io/download.php
 
-- **libav.js** (compilation toolchain + JS glue; Yahweasel/libav.js 6.8.8.0)
+- **libopus** (Opus audio codec library)
+  — 3-Clause BSD.
+  Upstream and source: https://github.com/xiph/opus
+
+- **libxml2** (XML parser 2.13.8)
+  — MIT.
+  Upstream and source: https://gitlab.gnome.org/GNOME/libxml2
+
+- **libav.js** (compilation toolchain + JS glue; Yahweasel/libav.js 6.8.8.0,
+  commit `1b7a07deed8f2fd63e8a7cb761fb50eebb3f31c2`)
   — 2-Clause BSD (glue) / LGPL-2.1 (bundled FFmpeg).
   Upstream: https://github.com/Yahweasel/libav.js
   Source: https://github.com/Yahweasel/libav.js/tree/v6.8.8.0
 
 ## License
 
-The FFmpeg + libmp3lame portions are distributed under the terms of the GNU
+The FFmpeg and libmp3lame portions are distributed under the terms of the GNU
 Lesser General Public License, version 2.1 or later. The full license text is
-in `LICENSE.LGPL-2.1` in this directory.
+in `LICENSE.LGPL-2.1` in this directory. libopus and libxml2 retain their
+permissive license notices in the generated JavaScript glue.
 
 Under LGPL-2.1 you are entitled to:
 - obtain the complete corresponding source code for the bundled libraries
@@ -34,17 +43,15 @@ Under LGPL-2.1 you are entitled to:
 - relink the WebAssembly binary against a modified version of any of the
   bundled LGPL libraries.
 
-The `.wasm` binary in this directory is shipped unmodified and is installed
-as a standalone file (not statically linked into extension JavaScript), so it
-can be replaced by a user-built equivalent without rebuilding the extension.
+The `.wasm` binary is installed as a standalone file rather than embedded in
+the extension JavaScript, so it can be replaced by a compatible user build.
 
-## Patent note — H.264
+## Patent note — H.264 and HEVC
 
-This bundle includes an H.264 *decoder*. H.264 is covered by patents licensed
-by MPEG LA. Consult your local counsel before distributing applications that
-decode H.264 at scale. This extension uses the decoder only to remux or
-transcode content that the end user has already obtained; no H.264 encoding
-is performed.
+This bundle includes H.264 and HEVC parsers used for stream-copy remuxing.
+Those standards may be covered by patents in some jurisdictions. Consult
+local counsel before distribution. No H.264 or HEVC video encoder or decoder
+is included, and the extension does not transcode video.
 
 ## Patent note — MP3
 
@@ -53,10 +60,17 @@ active patent claims apply to libmp3lame redistribution at this time.
 
 ## How to rebuild
 
-To produce a replacement artifact, check out
-https://github.com/Yahweasel/libav.js at tag `v6.8.8.0` and build the
-`h264-aac-mp3` variant per the project's README. The variant configuration
-adds HLS demuxing (`format-hls`), the libav-side fetch protocol
-(`protocol-jsfetch`), and the H.264 MP4-to-Annex-B bitstream filter
-(`bsf-h264_mp4toannexb`) on top of the base h264+aac+mp3 components.
-Drop the resulting `.wasm.wasm` + `.wasm.mjs` into this directory.
+Install Emscripten 4.0.5, activate its environment, install `pkg-config`, and
+run:
+
+```sh
+tools/media-remux/build-libav.sh
+```
+
+The script requires Emscripten 4.0.5, pins libav.js tag `v6.8.8.0` and commit
+`1b7a07deed8f2fd63e8a7cb761fb50eebb3f31c2`, verifies the libxml2 archive
+checksum, applies the documented `jsfetch` offset patch, builds the
+`web-media-remux-cli` configuration, and installs the wrapper, WebAssembly
+loader, and `.wasm` binary in this directory. The exact enabled formats,
+parsers, filters, and sole MP3 encoder are declared in
+`tools/media-remux/libav-web-media-remux.json`.

@@ -17,13 +17,13 @@ import type { LibAVInstance } from './libav-types';
 // returned the bare Emscripten Module without any of the decorated methods,
 // causing `libav.ffmpeg(...)` to throw "ffmpeg is not a function". Switching
 // to the wrapper restores the full API. The wrapper is variant-agnostic and
-// auto-discovers our custom h264-aac-mp3.wasm.mjs via base + variant.
+// auto-discovers our custom web-media-remux-cli.wasm.mjs via base + variant.
 //
 // Dedicated workers don't expose `chrome.*`, so resolve every extension URL
 // relative to the worker script's own location (chrome-extension://<id>/download_worker/main.js).
-const LIBAV_WRAPPER_URL = new URL('../libav/libav-6.8.8.0-h264-aac-mp3-cli.mjs', self.location.href).href;
+const LIBAV_VARIANT = 'web-media-remux-cli';
+const LIBAV_WRAPPER_URL = new URL(`../libav/libav-6.8.8.0-${LIBAV_VARIANT}.mjs`, self.location.href).href;
 const LIBAV_BASE_URL = new URL('../libav/', self.location.href).href;
-const LIBAV_VARIANT = 'h264-aac-mp3-cli';
 
 installLibAVGlobals();
 
@@ -82,18 +82,20 @@ export const registerOutputDevice = async (libav: LibAVInstance, opfsName: strin
       writeCount++;
       bytesWritten += buf.byteLength;
       if (writeCount === 1 || writeCount % 100 === 0) {
-        console.log(
-          `[libav] onwrite #${writeCount} name=${name} pos=${pos} len=${buf.byteLength} total=${bytesWritten}`,
-        );
+        console.log('[libav] output write', { writeCount, position: pos, byteLength: buf.byteLength, bytesWritten });
       }
     } catch (err) {
-      console.error(`[libav] onwrite failed at pos=${pos} len=${buf.byteLength}:`, err);
+      console.error('[libav] output write failed', {
+        position: pos,
+        byteLength: buf.byteLength,
+        errorName: err instanceof Error ? err.name : 'UnknownError',
+      });
       throw err;
     }
   };
-  console.log(`[libav] registering writer device for ${opfsName}`);
+  console.log('[libav] registering writer device');
   await libav.mkwriterdev(opfsName);
-  console.log(`[libav] writer device ready for ${opfsName}`);
+  console.log('[libav] writer device ready');
 };
 
 // jsfetch tunables — sensible defaults for HLS/DASH fetching. All are milliseconds.

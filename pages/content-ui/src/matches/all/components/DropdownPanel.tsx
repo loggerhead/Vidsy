@@ -1,22 +1,22 @@
-import type { MediaItem } from '@extension/shared';
-import { GLASS_PANEL, GLASS_BORDER, BLUR, TEXT, MUTED, HOVER } from './tokens';
 import { IcoDown } from './icons';
+import { GLASS_PANEL, GLASS_BORDER, BLUR, TEXT, MUTED, HOVER } from './tokens';
 import { kindStr } from '../lib/media-helpers';
+import type { MediaItem, MediaVariant } from '@extension/shared';
 
-type Row = { label: string; sub: string; item: MediaItem; variantUrl?: string };
+type Row = { label: string; sub: string; item: MediaItem; variant?: MediaVariant };
 
 export const DropdownPanel = ({
   rows,
   primary,
-  bestUrl,
+  bestVariant,
   bestQLabel,
   onDownload,
 }: {
   rows: Row[];
   primary: MediaItem;
-  bestUrl: string;
+  bestVariant?: MediaVariant;
   bestQLabel: string;
-  onDownload: (item: MediaItem, variantUrl?: string) => void;
+  onDownload: (item: MediaItem, variant?: MediaVariant) => void;
 }) => (
   <div
     style={{
@@ -33,7 +33,7 @@ export const DropdownPanel = ({
     }}>
     {/* Best quality shortcut */}
     <button
-      onClick={() => onDownload(primary, bestUrl)}
+      onClick={() => onDownload(primary, bestVariant)}
       style={{
         width: '100%',
         display: 'flex',
@@ -60,7 +60,7 @@ export const DropdownPanel = ({
     {rows.map((row, idx) => (
       <button
         key={`${row.item.url}-${idx}`}
-        onClick={() => onDownload(row.item, row.variantUrl)}
+        onClick={() => onDownload(row.item, row.variant)}
         style={{
           width: '100%',
           display: 'flex',

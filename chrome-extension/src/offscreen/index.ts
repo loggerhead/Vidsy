@@ -6,7 +6,6 @@ import { downloadHttpDirect } from './lib/http-download';
 import { downloadMerged } from './lib/merged-download';
 import { purgeOpfsOrphans } from './lib/opfs-gc';
 import { activeAbortControllers } from './lib/segment-fetcher';
-import { getOpfsFile, muxInWorker, removeOpfs } from './lib/worker-client';
 
 // Sweep orphaned OPFS files left over from a prior session (crash,
 // browser kill, extension reload). Fire-and-forget so the message
@@ -34,32 +33,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
-  if (message.type === 'offscreen/libav-spike') {
-    // Phase 2 smoke test — not used by the download dispatcher. Trigger from
-    // the SW console: chrome.runtime.sendMessage({ type: 'offscreen/libav-spike',
-    // payload: { url: '<public HLS URL>' } })
-    const { url, outputOpfsName = `spike-${Date.now().toString(36)}.mp4` } = message.payload ?? {};
-    const key = `libav-spike-${Date.now().toString(36)}`;
-    (async () => {
-      try {
-        const ffmpegArgs = ['-f', 'hls', '-i', `jsfetch:${url}`, '-c', 'copy', '-y', outputOpfsName];
-        const { totalBytes } = await muxInWorker({ jobKey: key, outputOpfsName, ffmpegArgs });
-        const file = await getOpfsFile(outputOpfsName);
-        const blobUrl = URL.createObjectURL(file);
-        sendResponse({ ok: true, blobUrl, totalBytes, outputOpfsName });
-      } catch (err) {
-        await removeOpfs(outputOpfsName).catch(() => undefined);
-        sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
-      }
-    })();
-    return true;
-  }
-
   if (message.type === 'offscreen/download-blob') {
     const { kind, url, fileName, output, key, headers, audioUrl, videoMimeType, audioMimeType } = message.payload;
-    const handle = (p: Promise<{ blobUrl: string; ext: string }>) =>
+    const handle = (
+      p: ReturnType<
+        typeof downloadHlsMuxed | typeof downloadDashMuxed | typeof downloadMerged | typeof downloadHttpDirect
+      >,
+    ) =>
       p
-        .then(result => sendResponse({ ok: true, blobUrl: result.blobUrl, ext: result.ext }))
+        .then(result => sendResponse({ ok: true, ...result }))
         .catch(err => sendResponse({ ok: false, error: String(err) }));
 
     if (kind === 'hls') {

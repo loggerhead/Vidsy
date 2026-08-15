@@ -1,4 +1,3 @@
-import { registerOutputForCleanup } from './blob-cleanup';
 import {
   dashManifestDurationSeconds,
   jsfetchInputForOpfs,
@@ -6,9 +5,13 @@ import {
   needsAuthFallback,
   preflightDiskSpace,
 } from './libav-mux';
+import { describeDash, describeDirectFile, mergeTrackDescriptors } from './media-descriptor';
+import { executeMuxPlan, requireExecutablePlan } from './media-executor';
+import { planMediaProcessing } from './media-processing';
+import { prepareOutputDelivery } from './output-delivery';
 import { updateProgress, clearProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
-import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, muxInWorker, removeOpfs } from './worker-client';
+import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs } from './worker-client';
 
 const opfsNameFor = (key: string, tag: string, ext: string): string =>
   `dash-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}-${tag}-${Date.now().toString(36)}.${ext}`;
@@ -149,66 +152,6 @@ const parseDashSegments = (xml: string, manifestUrl: string): DashTrackSet => {
   return result;
 };
 
-// ─── ffmpeg argv builders ───
-
-const mp4StreamCopyArgs = (input: string, output: string): string[] => ['-i', input, '-c', 'copy', '-y', output];
-
-const mp3TranscodeArgs = (input: string, output: string): string[] => [
-  '-i',
-  input,
-  '-vn',
-  '-c:a',
-  'libmp3lame',
-  '-q:a',
-  '2',
-  '-y',
-  output,
-];
-
-const dashMp4MuxArgs = (jsfetchUrl: string, output: string): string[] => [
-  '-f',
-  'dash',
-  '-i',
-  jsfetchUrl,
-  '-map',
-  '0:v:0',
-  '-map',
-  '0:a:0?',
-  '-c',
-  'copy',
-  '-y',
-  output,
-];
-
-const dashMp3TranscodeArgs = (jsfetchUrl: string, output: string): string[] => [
-  '-f',
-  'dash',
-  '-i',
-  jsfetchUrl,
-  '-vn',
-  '-c:a',
-  'libmp3lame',
-  '-q:a',
-  '2',
-  '-y',
-  output,
-];
-
-const twoInputCopyArgs = (videoUrl: string, audioUrl: string, output: string): string[] => [
-  '-i',
-  videoUrl,
-  '-i',
-  audioUrl,
-  '-map',
-  '0:v:0',
-  '-map',
-  '1:a:0?',
-  '-c',
-  'copy',
-  '-y',
-  output,
-];
-
 // ─── DASH download ───
 
 export const downloadDashMuxed = async (
@@ -217,7 +160,7 @@ export const downloadDashMuxed = async (
   output: 'mp4' | 'mp3',
   key: string,
   headers?: Record<string, string>,
-): Promise<{ blobUrl: string; ext: string }> => {
+): ReturnType<typeof prepareOutputDelivery> => {
   void fileName;
   await updateProgress(key, { stage: 'fetch-manifest', downloadedBytes: 0 });
 
@@ -225,16 +168,15 @@ export const downloadDashMuxed = async (
   activeAbortControllers.set(key, abortController);
   abortController.signal.addEventListener('abort', () => cancelWorkerJob(key));
 
-  const useAuthFallback = needsAuthFallback(headers);
-  const ext = output === 'mp3' ? '.mp3' : '.mp4';
-  const outputOpfsName = opfsNameFor(key, 'out', output);
   // Fetch the MPD once — we need it for duration in both paths and for
   // segment URLs in the auth-fallback path.
   const mpdText = await fetchMpdText(manifestUrl);
-  if (/<ContentProtection\b/i.test(mpdText)) {
-    throw new Error('This video is DRM-protected and cannot be downloaded.');
-  }
   const durationSeconds = dashManifestDurationSeconds(mpdText);
+  let descriptor = describeDash(mpdText, durationSeconds);
+  let plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
+  let outputContainer = plan.output.container;
+  let outputOpfsName = opfsNameFor(key, 'out', outputContainer);
+  const useAuthFallback = needsAuthFallback(headers);
   let videoInputOpfs: string | null = null;
   let audioInputOpfs: string | null = null;
   let videoBlobUrl: string | null = null;
@@ -245,11 +187,16 @@ export const downloadDashMuxed = async (
       // Direct: libav demuxes DASH natively, pulling each representation over
       // jsfetch. DNR rewrites still apply to those sub-fetches.
       const jsfetchUrl = jsfetchInputForUrl(manifestUrl);
-      const args =
-        output === 'mp3'
-          ? dashMp3TranscodeArgs(jsfetchUrl, outputOpfsName)
-          : dashMp4MuxArgs(jsfetchUrl, outputOpfsName);
-      await muxInWorker({ jobKey: key, outputOpfsName, ffmpegArgs: args, durationSeconds });
+      if (plan.type === 'passthrough' || plan.type === 'concatenate-fmp4') {
+        throw new Error(`Unexpected ${plan.type} plan for DASH input`);
+      }
+      await executeMuxPlan({
+        jobKey: key,
+        outputOpfsName,
+        plan,
+        input: { urls: [jsfetchUrl], formatHint: 'dash' },
+        durationSeconds,
+      });
     } else {
       // Auth-fallback: parse the MPD, pre-fetch video + audio segments into
       // separate OPFS files, then feed libav two jsfetch:blob inputs.
@@ -283,16 +230,6 @@ export const downloadDashMuxed = async (
         totalBytes += ab;
       }
 
-      // Video-only fMP4 + MP4 output: init + fMP4 IS the MP4, skip libav.
-      if (output !== 'mp3' && videoInputOpfs && !audioInputOpfs) {
-        const file = await getOpfsFile(videoInputOpfs);
-        const blobUrl = URL.createObjectURL(file);
-        registerOutputForCleanup(blobUrl, videoInputOpfs);
-        videoInputOpfs = null;
-        await clearProgress(key);
-        return { blobUrl, ext: '.mp4' };
-      }
-
       await preflightDiskSpace(totalBytes);
 
       const videoJsfetch = videoInputOpfs ? await jsfetchInputForOpfs(videoInputOpfs) : null;
@@ -300,23 +237,32 @@ export const downloadDashMuxed = async (
       const audioJsfetch = audioInputOpfs ? await jsfetchInputForOpfs(audioInputOpfs) : null;
       if (audioJsfetch) audioBlobUrl = audioJsfetch.blobUrl;
 
-      let args: string[];
-      if (output === 'mp3') {
-        // Prefer audio track; fall back to extracting audio from video track.
-        const sourceUrl = audioJsfetch?.jsfetchUrl ?? videoJsfetch!.jsfetchUrl;
-        args = mp3TranscodeArgs(sourceUrl, outputOpfsName);
-      } else if (videoJsfetch && audioJsfetch) {
-        args = twoInputCopyArgs(videoJsfetch.jsfetchUrl, audioJsfetch.jsfetchUrl, outputOpfsName);
-      } else {
-        // Audio-only MP4 output (rare but valid).
-        args = mp4StreamCopyArgs(audioJsfetch!.jsfetchUrl, outputOpfsName);
+      const inputFiles = [
+        videoInputOpfs ? await getOpfsFile(videoInputOpfs) : null,
+        audioInputOpfs ? await getOpfsFile(audioInputOpfs) : null,
+      ].filter((file): file is File => file !== null);
+      const inputDescriptors = await Promise.all(inputFiles.map(file => describeDirectFile(file, 'separate-tracks')));
+      descriptor = mergeTrackDescriptors(inputDescriptors);
+      plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
+      if (plan.type === 'passthrough' || plan.type === 'concatenate-fmp4') {
+        throw new Error(`Unexpected ${plan.type} plan for prefetched DASH tracks`);
       }
-      await muxInWorker({
+      if (plan.output.container !== outputContainer) {
+        void removeOpfs(outputOpfsName).catch(() => undefined);
+        outputContainer = plan.output.container;
+        outputOpfsName = opfsNameFor(key, 'out', outputContainer);
+      }
+      const inputUrls =
+        plan.type === 'transcode-audio-to-mp3'
+          ? [audioJsfetch?.jsfetchUrl ?? videoJsfetch!.jsfetchUrl]
+          : [videoJsfetch?.jsfetchUrl, audioJsfetch?.jsfetchUrl].filter((url): url is string => Boolean(url));
+      await executeMuxPlan({
         jobKey: key,
         outputOpfsName,
-        ffmpegArgs: args,
+        plan,
+        input: { urls: inputUrls },
         durationSeconds,
-        estimatedBytes: output === 'mp3' ? undefined : totalBytes,
+        estimatedBytes: plan.type === 'transcode-audio-to-mp3' ? undefined : totalBytes,
       });
 
       if (videoBlobUrl) URL.revokeObjectURL(videoBlobUrl);
@@ -334,10 +280,14 @@ export const downloadDashMuxed = async (
     }
 
     const outputFile = await getOpfsFile(outputOpfsName);
-    const blobUrl = URL.createObjectURL(outputFile);
-    registerOutputForCleanup(blobUrl, outputOpfsName);
+    const delivery = await prepareOutputDelivery({
+      file: outputFile,
+      opfsName: outputOpfsName,
+      plan,
+      expectedDurationSeconds: durationSeconds,
+    });
     await clearProgress(key);
-    return { blobUrl, ext };
+    return delivery;
   } catch (err) {
     if (videoBlobUrl) {
       try {

@@ -37,7 +37,8 @@ For early access to fixes or for development testing:
 - **Auto-close standalone window** *(new in 1.1.0)* — opt-in checkbox on the Complete view; window self-closes 3 seconds after the download succeeds
 - **System theme on first run** *(new in 1.1.0)* — extension UI defaults to your OS `prefers-color-scheme` instead of always starting light; manual toggle still wins after that
 - **Automatic media detection** via network request monitoring (`webRequest` API)
-- **HLS/DASH support** with segment downloading, AES-128 decryption, and libav.js remux to MP4
+- **HLS/DASH support** with segment downloading, AES-128 HLS decryption, and libav.js stream-copy remux
+- **HEVC/H.265 HLS support** — HEVC + AAC MPEG-TS is remuxed without video transcoding into an MP4 tagged `hvc1`
 - **Multi-GB downloads** via OPFS (Origin Private File System) streaming — no 2 GB WASM memory cliff
 - **MP3 audio extraction** from any source using `libmp3lame` transcoding (quality `-q:a 2`, ~190 kbps VBR)
 - **Subtitle / closed-caption download** — detects WebVTT, SRT, TTML, and auto-generated tracks; converts to SRT on save
@@ -61,14 +62,16 @@ For early access to fixes or for development testing:
 
 | Strategy | Source type | Output | Notes |
 |----------|-------------|--------|-------|
-| HTTP Range-parallel | Direct MP4 / MP3 URLs | MP4 / MP3 | Multi-connection for speed; no mux needed for MP4 |
-| HLS stream-copy | `.m3u8` playlists (TS or fMP4) | MP4 | Native libav HLS demuxer; AES-128 handled |
-| HLS transcode | `.m3u8` → audio only | MP3 | libmp3lame encode |
-| DASH stream-copy | `.mpd` manifests | MP4 | Native libav DASH demuxer |
-| Merged V+A | Separate video & audio tracks | MP4 | Single libav pass with two `jsfetch:` inputs |
+| HTTP direct | MP4 with H.264/HEVC + optional AAC | MP4 | Range-parallel transport when supported; validated passthrough |
+| HLS stream-copy | MPEG-TS or fMP4 with H.264/HEVC + optional AAC | MP4 | Native HLS demux; AES-128 handled; no video transcoding |
+| HLS audio extraction | Decodable AAC/MP3/Opus audio | MP3 | The only transcoding path; uses `libmp3lame` |
+| DASH stream-copy | MP4 representations with H.264/HEVC + optional AAC | MP4 | Native DASH demux or validated separated-track merge |
+| Merged V+A | Separate H.264/HEVC video and AAC audio tracks | MP4 | Single stream-copy pass with two `jsfetch:` inputs |
+| WebM stream-copy | WebM with VP9 + optional Opus | WebM | Container and tracks remain WebM-compatible |
 | Subtitles | WebVTT / SRT / TTML | SRT | Converted on save |
 
 DRM-protected streams are detected pre-dispatch and rejected with a user-visible message — Vidsy does not attempt decryption of protected content.
+Video is never transcoded. AV1, Vorbis, and codec/container combinations not listed above are rejected unless a future release adds matching fixtures, planner assertions, and end-to-end validation.
 
 ## Architecture
 
@@ -179,11 +182,13 @@ The extension sets `cross-origin-embedder-policy: require-corp` and `cross-origi
 
 ## Licenses
 
-This project bundles a prebuilt **libav.js** WebAssembly binary (FFmpeg + libmp3lame) under **LGPL-2.1**. The full attribution, patent notes (H.264 / MP3), and rebuild instructions are in [`chrome-extension/public/libav/NOTICE.md`](chrome-extension/public/libav/NOTICE.md) and [`chrome-extension/public/libav/LICENSE.LGPL-2.1`](chrome-extension/public/libav/LICENSE.LGPL-2.1).
+This project bundles a prebuilt **libav.js** WebAssembly binary (FFmpeg, libmp3lame, libopus, and libxml2). The full attribution, H.264/HEVC patent note, source locations, and reproducible rebuild instructions are in [`chrome-extension/public/libav/NOTICE.md`](chrome-extension/public/libav/NOTICE.md) and [`chrome-extension/public/libav/LICENSE.LGPL-2.1`](chrome-extension/public/libav/LICENSE.LGPL-2.1).
 
 - **FFmpeg** (libavformat, libavcodec, libavutil, …) — LGPL-2.1-or-later — <https://ffmpeg.org/>
 - **libmp3lame** 3.100 — LGPL-2.1-or-later — <https://lame.sourceforge.io/>
-- **libav.js** 6.5.7.1 (compile toolchain + JS glue) — 2-Clause BSD / LGPL-2.1 — <https://github.com/Yahweasel/libav.js>
+- **libopus** — 3-Clause BSD — <https://github.com/xiph/opus>
+- **libxml2** 2.13.8 — MIT — <https://gitlab.gnome.org/GNOME/libxml2>
+- **libav.js** 6.8.8.0 (compile toolchain + JS glue) — 2-Clause BSD / LGPL-2.1 — <https://github.com/Yahweasel/libav.js>
 
 Under LGPL-2.1 you may obtain complete source for the bundled libraries at the URLs above and relink the WebAssembly against a modified version. See `NOTICE.md` for the rebuild recipe.
 

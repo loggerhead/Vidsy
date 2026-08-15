@@ -1,33 +1,33 @@
 import { removeOpfs } from './worker-client';
 
 // Tracks blob URLs whose underlying File is backed by an OPFS entry that must
-// be removed once the browser-level chrome.downloads.download has completed.
-// The SW reports completion via `offscreen/cleanup-blob`; we also fall back to
-// a 5-minute timeout so an orphaned entry never lives forever.
-const pending = new Map<string, { opfsName: string; timeout: ReturnType<typeof setTimeout> }>();
+// be removed once the browser-level chrome.downloads.download has completed
+// or was interrupted. Startup OPFS GC recovers if that message is lost.
+const pending = new Map<string, { opfsName: string }>();
 
-const FALLBACK_MS = 5 * 60_000;
-
-export const registerOutputForCleanup = (blobUrl: string, opfsName: string): void => {
-  const timeout = setTimeout(() => {
-    void cleanupBlob(blobUrl);
-  }, FALLBACK_MS);
-  pending.set(blobUrl, { opfsName, timeout });
+const registerOutputForCleanup = (blobUrl: string, opfsName: string): void => {
+  pending.set(blobUrl, { opfsName });
 };
 
-export const cleanupBlob = async (blobUrl: string): Promise<void> => {
+type CleanupDependencies = {
+  revokeObjectUrl?: (url: string) => void;
+  removeOutput?: (opfsName: string) => Promise<void>;
+};
+
+const cleanupBlob = async (blobUrl: string, dependencies: CleanupDependencies = {}): Promise<void> => {
   const entry = pending.get(blobUrl);
   if (!entry) return;
   pending.delete(blobUrl);
-  clearTimeout(entry.timeout);
   try {
-    URL.revokeObjectURL(blobUrl);
+    (dependencies.revokeObjectUrl ?? URL.revokeObjectURL)(blobUrl);
   } catch {
     /* ignore */
   }
   try {
-    await removeOpfs(entry.opfsName);
+    await (dependencies.removeOutput ?? removeOpfs)(entry.opfsName);
   } catch {
     /* ignore */
   }
 };
+
+export { cleanupBlob, registerOutputForCleanup };

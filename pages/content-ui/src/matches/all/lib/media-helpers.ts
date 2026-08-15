@@ -4,7 +4,7 @@ import type { MediaItem, MediaVariant } from '@extension/shared';
 // 1080×1920 portrait), not whichever side happens to be the height field.
 const shortEdgeLabel = (r: { width: number; height: number }) => `${Math.min(r.width, r.height)}p`;
 
-type Row = { label: string; sub: string; item: MediaItem; variantUrl?: string };
+type Row = { label: string; sub: string; item: MediaItem; variant?: MediaVariant };
 
 const topLevelQuality = (item: MediaItem): string => (item.resolution ? shortEdgeLabel(item.resolution) : '');
 
@@ -22,7 +22,11 @@ export const pickBestVariant = (vs: MediaVariant[]): MediaVariant | undefined =>
   }, undefined);
 
 export const qLabel = (v: MediaVariant): string =>
-  v.resolution ? shortEdgeLabel(v.resolution) : v.bandwidth ? `${Math.round(v.bandwidth / 1000)}k` : (v.name ?? '');
+  v.resolution
+    ? `${shortEdgeLabel(v.resolution)}${v.frameRate && v.frameRate > 30 ? Math.round(v.frameRate) : ''}`
+    : v.bandwidth
+      ? `${Math.round(v.bandwidth / 1000)}k`
+      : (v.name ?? '');
 
 export const kindStr = (k: string): string => {
   switch (k) {
@@ -82,13 +86,13 @@ export const buildRows = (items: MediaItem[]): Row[] => {
           if (est) sizeStr = `~${est}`;
         }
         const parts = [kt, duration, sizeStr, qLabel(v)].filter(Boolean);
-        rows.push({ label: `${i++}. ${title}`, sub: parts.join(' · '), item, variantUrl: v.url });
+        rows.push({ label: `${i++}. ${title}`, sub: parts.join(' · '), item, variant: v });
       }
     } else {
       const size = formatBytes(item.contentLength);
       const q = topLevelQuality(item);
       const parts = [kt, duration, size, q].filter(Boolean);
-      rows.push({ label: `${i++}. ${title}`, sub: parts.join(' · '), item, variantUrl: undefined });
+      rows.push({ label: `${i++}. ${title}`, sub: parts.join(' · '), item, variant: undefined });
     }
   }
   return rows;

@@ -1,4 +1,4 @@
-// Minimal ambient typings for libav.js 6.5.7.1 h264-aac-mp3 variant.
+// Minimal ambient typings for the libav.js 6.8.8.0 web-media-remux-cli variant.
 // We only declare the surface we actually call from libav.ts — extend as needed.
 
 interface LibAVInstance {
@@ -22,7 +22,7 @@ interface LibAVInstance {
   jsfetch_set_bypass_cache?: (flag: number) => Promise<void>;
 
   // Optional progress / cancellation helpers — exposed by custom libav.js
-  // builds but absent from the vendored h264-aac-mp3 wasm. Callers check
+  // builds but absent from the vendored web-media-remux-cli wasm. Callers check
   // `typeof === 'function'` before using.
   ffmpeg_get_out_time_ms?: () => Promise<number>;
   ffmpeg_get_total_size_bytes?: () => Promise<number>;

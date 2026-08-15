@@ -1,0 +1,26 @@
+--- a/libavformat/jsfetch.c
++++ b/libavformat/jsfetch.c
+@@ -174,7 +174,11 @@ static int jsfetch_open(URLContext *h, const char *url, int flags, AVDictionary
+ static int jsfetch_read(URLContext *h, unsigned char *buf, int size)
+ {
+     JSFetchContext *ctx = h->priv_data;
+-    return jsfetch_read_js(ctx->idx, buf, size);
++    int ret = jsfetch_read_js(ctx->idx, buf, size);
++
++    if (ret > 0)
++        ctx->off += ret;
++    return ret;
+ }
+ 
+ EM_JS(int, jsfetch_seek_js, (int old_idx, const char *url, uint64_t start_offset), {
+--- a/libavformat/dashdec.c
++++ b/libavformat/dashdec.c
+@@ -431,6 +431,8 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
+                    url);
+             return AVERROR_INVALIDDATA;
+         }
++    } else if (av_strstart(proto_name, "jsfetch", NULL)) {
++        ;
+     } else if (av_strstart(proto_name, "http", NULL)) {
+         ;
+     } else

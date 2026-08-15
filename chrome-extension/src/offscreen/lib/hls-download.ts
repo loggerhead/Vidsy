@@ -1,16 +1,10 @@
+import { fetchResolvedHlsPlaylist, headersForFetch } from './hls-request';
+import { hlsManifestDurationSeconds, jsfetchInputForOpfs, jsfetchInputForUrl, preflightDiskSpace } from './libav-mux';
+import { parseHlsPlaylist } from './m3u8-parser';
 import { describeHls } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
 import { prepareOutputDelivery } from './output-delivery';
-import { fetchResolvedHlsPlaylist, headersForFetch } from './hls-request';
-import {
-  hlsManifestDurationSeconds,
-  jsfetchInputForOpfs,
-  jsfetchInputForUrl,
-  needsAuthFallback,
-  preflightDiskSpace,
-} from './libav-mux';
-import { parseHlsPlaylist } from './m3u8-parser';
 import { updateProgress, clearProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
 import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs } from './worker-client';
@@ -54,12 +48,11 @@ export const downloadHlsMuxed = async (
   const plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
   if (plan.type === 'passthrough') throw new Error('Unexpected passthrough plan for HLS input');
   const outputOpfsName = opfsNameFor(key, 'out', plan.output.container);
-  const useAuthFallback = needsAuthFallback(headers);
   let inputOpfsName: string | null = null;
   let inputBlobUrl: string | null = null;
 
   try {
-    if (!useAuthFallback && plan.type !== 'concatenate-fmp4') {
+    if (!plan.prefetchToOpfs && plan.type !== 'concatenate-fmp4') {
       // Direct: libav demuxes HLS natively and writes the MP4/MP3 to OPFS.
       const jsfetchUrl = jsfetchInputForUrl(variantUrl);
       await executeMuxPlan({
@@ -70,8 +63,8 @@ export const downloadHlsMuxed = async (
         durationSeconds,
       });
     } else {
-      // Auth-fallback: pre-fetch segments into OPFS so DNR-rewritten auth
-      // headers reach the CDN, then feed libav an OPFS-backed blob URL.
+      // Prefetch: download segments with retry and strict response validation,
+      // then feed libav one stable OPFS-backed input.
       const { segments, mapUrl } = parseHlsPlaylist(manifestText, variantUrl);
       if (segments.length === 0) throw new Error('No segments in HLS playlist');
       const resourceUrls = [mapUrl, ...segments.flatMap(segment => [segment.url, segment.keyInfo?.uri])].filter(
