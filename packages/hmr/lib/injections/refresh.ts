@@ -1,33 +1,17 @@
 import initClient from '../initializers/init-client.js';
 
 (() => {
-  let pendingReload = false;
-
   initClient({
     // @ts-expect-error That's because of the dynamic code loading
     id: __HMR_ID,
     onUpdate: () => {
-      // disable reload when tab is hidden
-      if (document.hidden) {
-        pendingReload = true;
-        return;
-      }
-      reload();
+      // Refresh only the tab being worked on. A hidden tab deliberately keeps
+      // its existing page and HMR connection; it must not refresh merely
+      // because the user visits it later.
+      const isTestTab = navigator.webdriver;
+      if (document.hidden && !isTestTab) return false;
+      window.location.reload();
+      return true;
     },
   });
-
-  // reload
-  const reload = (): void => {
-    pendingReload = false;
-    window.location.reload();
-  };
-
-  // reload when tab is visible
-  const reloadWhenTabIsVisible = (): void => {
-    if (!document.hidden && pendingReload) {
-      reload();
-    }
-  };
-
-  document.addEventListener('visibilitychange', reloadWhenTabIsVisible);
 })();

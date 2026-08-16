@@ -30,5 +30,10 @@ export const initAppWithShadow = ({ id, app, inlineCss }: { id: string; inlineCs
   }
 
   shadowRoot.appendChild(rootIntoShadow);
-  createRoot(rootIntoShadow).render(app);
+  const reactRoot = createRoot(rootIntoShadow);
+  reactRoot.render(app);
+  return () => {
+    reactRoot.unmount();
+    root.remove();
+  };
 };

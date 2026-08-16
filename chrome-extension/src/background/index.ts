@@ -1,19 +1,70 @@
 /// <reference types="vite/client" />
 import 'webextension-polyfill';
-import { handleNetworkDetection, upsertDetection, clearTabDetections, setMainVideoPresent } from './lib/detection';
-import { handleDownload, pauseDownload, cancelDownload } from './lib/download';
+import {
+  configureDetectionTabLifecycle,
+  handleNetworkDetection,
+  upsertDetection,
+  clearTabDetections,
+  setMainVideoPresent,
+} from './lib/detection';
+import { cancelDownloadsForTab, handleDownload, pauseDownload, cancelDownload } from './lib/download';
 import { setupDownloadInterceptor, resumeBrowserDownload, openDownloadsWindow } from './lib/download-interceptor';
 import { reorderQueueItem } from './lib/download-queue';
-import { authorizeUrlForDownload, setupHeaderCapture, cleanupStaleDnrRules } from './lib/header-capture';
+import {
+  authorizeUrlForDownload,
+  clearCapturedHeadersForTab,
+  cleanupStaleDnrRules,
+  configureHeaderCaptureTabFilter,
+  setupHeaderCapture,
+} from './lib/header-capture';
 import { deriveKind, deriveFileName } from './lib/media-utils';
 import { classifyAndAddUrl } from './lib/paste-url';
 import { updateProgress, clearProgress, clearTerminalProgress } from './lib/progress';
 import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
 import type { MediaMessage } from '@extension/shared';
 import { configureSessionAccessLevel } from '@extension/storage';
+import { createTabWorkLifecycle } from './lib/tab-work-lifecycle';
 
 export const startBackground = (): void => {
   const log = createLogger('background');
+  const dispatchTabLifecycleEvent = async (tabId: number, eventName: string, allFrames: boolean) => {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId, ...(allFrames ? { allFrames: true } : {}) },
+        func: name => window.dispatchEvent(new CustomEvent(name)),
+        args: [eventName],
+      });
+    } catch {
+      // The tab may have closed or be a browser-internal page without an injected script.
+    }
+  };
+  const tabWork = createTabWorkLifecycle({
+    start: async ({ tabId, signal }) => {
+      if (signal.aborted) return;
+      await Promise.all([
+        dispatchTabLifecycleEvent(tabId, 'vidsy:start-content', true),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:start-content-ui', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:start-youtube', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:start-youtube-main', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:start-vimeo', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:start-vimeo-main', false),
+      ]);
+    },
+    stop: async ({ tabId }) => {
+      await Promise.all([
+        dispatchTabLifecycleEvent(tabId, 'vidsy:stop-content', true),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:stop-content-ui', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:stop-youtube', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:stop-youtube-main', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:stop-vimeo', false),
+        dispatchTabLifecycleEvent(tabId, 'vidsy:stop-vimeo-main', false),
+      ]);
+      await Promise.all([clearTabDetections(tabId), cancelDownloadsForTab(tabId)]);
+      clearCapturedHeadersForTab(tabId);
+    },
+  });
+  configureDetectionTabLifecycle(tabWork);
+  configureHeaderCaptureTabFilter(tabId => tabWork.isRunning(tabId));
 
   void configureSessionAccessLevel().catch((error: unknown) => {
     log.error('storage.session_access_failed', error);
@@ -38,6 +89,7 @@ export const startBackground = (): void => {
   // ─── Network detection listener ───
   chrome.webRequest.onResponseStarted.addListener(
     details => {
+      if (!tabWork.isRunning(details.tabId)) return;
       log.debug('network.response_started', {
         tabId: details.tabId,
         type: details.type,
@@ -92,6 +144,10 @@ export const startBackground = (): void => {
       }
       const msg = message as MediaMessage;
       if (msg.type === MEDIA_MESSAGE.DETECTED) {
+        if (sender.tab?.id === undefined || !tabWork.isRunning(sender.tab.id)) {
+          sendResponse({ ok: false, error: 'Detection is not running for this tab' });
+          return;
+        }
         log.debug('message.detected', {
           tabId: sender.tab?.id,
           url: msg.payload.url,
@@ -336,11 +392,22 @@ export const startBackground = (): void => {
 
   // ─── Tab listeners ───
   chrome.tabs.onRemoved.addListener(tabId => {
-    void clearTabDetections(tabId);
+    void tabWork.close(tabId);
   });
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading') void clearTabDetections(tabId);
+    if (changeInfo.status === 'loading' || changeInfo.url !== undefined) {
+      void tabWork.navigationStarted(tabId);
+      return;
+    }
+    if (changeInfo.status === 'complete') void tabWork.pageReady(tabId);
   });
+  chrome.tabs.onActivated.addListener(({ tabId }) => {
+    void chrome.tabs.get(tabId).then(tab => tabWork.activate(tabId, tab.status === 'complete')).catch(() => undefined);
+  });
+  void chrome.tabs
+    .query({ active: true, currentWindow: true })
+    .then(([tab]) => (tab?.id === undefined ? undefined : tabWork.activate(tab.id, tab.status === 'complete')))
+    .catch(() => undefined);
 
   // ─── Context menu ───
   const createContextMenus = () => {

@@ -5,6 +5,14 @@ export default defineContentScript({
   matches: ['*://*.youtube.com/*'],
   runAt: 'document_idle',
   main() {
-    startYouTubeContentScript();
+    let stop: (() => void) | undefined;
+    window.addEventListener('vidsy:start-youtube', () => {
+      stop?.();
+      stop = startYouTubeContentScript();
+    });
+    window.addEventListener('vidsy:stop-youtube', () => {
+      stop?.();
+      stop = undefined;
+    });
   },
 });

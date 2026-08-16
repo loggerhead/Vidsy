@@ -4,8 +4,16 @@
  */
 import { createBridge, onFromIsolated, sendToIsolated } from '@src/lib/broadcast-bridge';
 
-export const startVimeoMainContentScript = (): void => {
+export const startVimeoMainContentScript = (): (() => void) => {
   const channel = createBridge(window.location.href);
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const schedule = (callback: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+  };
 
   const pollPlayerConfig = () => {
     let delay = 1000;
@@ -24,17 +32,22 @@ export const startVimeoMainContentScript = (): void => {
       attempts++;
       if (attempts >= maxAttempts) return;
       delay = Math.min(delay * 2, maxDelay);
-      setTimeout(check, delay);
+      schedule(check, delay);
     };
 
-    setTimeout(check, delay);
+    schedule(check, delay);
   };
 
-  onFromIsolated(channel, msg => {
+  const stopBridge = onFromIsolated(channel, msg => {
     if (msg.name === 'vimeo_request_config') {
       pollPlayerConfig();
     }
   });
 
   pollPlayerConfig();
+  return () => {
+    stopBridge();
+    channel.close();
+    timers.forEach(clearTimeout);
+  };
 };

@@ -38,6 +38,7 @@ const payloadFromCommand = (command: ExecutorCommand): DownloadPayload => ({
   audioUrl: command.execution.audioUrl,
   audioMimeType: command.execution.audioMimeType,
   title: command.execution.fileName,
+  tabId: command.display.tabId,
 });
 
 const projectSnapshot = async () => {
@@ -57,6 +58,7 @@ const projectSnapshot = async () => {
       detectedAt: job.createdAt,
       source: 'network',
       fileName: job.execution.fileName,
+      tabId: job.display.tabId,
     };
     await updateProgress(
       job.requestId,
@@ -145,16 +147,29 @@ const enqueueDownload = async (payload: DownloadPayload, item: MediaItem): Promi
       audioUrl: payload.audioUrl,
       audioMimeType: payload.audioMimeType,
     },
-    display: { title: item.title, itemId: item.id, pageUrl: item.pageUrl },
+    display: { title: item.title, itemId: item.id, pageUrl: item.pageUrl, tabId: item.tabId },
   });
   await runtime.bootstrap();
   await projectSnapshot();
 };
 
 const cancelQueued = async (key: string): Promise<boolean> => {
-  const changed = await runtime.command(key, { type: 'cancel' });
+  const snapshot = await runtime.snapshot();
+  const job = snapshot.jobs.find(item => item.requestId === key || item.jobId === key);
+  if (!job) return false;
+  const changed = await runtime.command(job.jobId, { type: 'cancel' });
   await projectSnapshot();
   return changed;
+};
+
+const cancelDownloadsForTab = async (tabId: number): Promise<void> => {
+  const snapshot = await runtime.snapshot();
+  await Promise.all(
+    snapshot.jobs
+      .filter(job => job.display.tabId === tabId && !['succeeded', 'failed', 'cancelled'].includes(job.state))
+      .map(job => runtime.command(job.jobId, { type: 'cancel' })),
+  );
+  await projectSnapshot();
 };
 
 const reorderQueueItem = async (key: string, direction: 'up' | 'down'): Promise<boolean> => {
@@ -179,4 +194,4 @@ const queueState = async () => {
   };
 };
 
-export { cancelQueued, enqueueDownload, queueState, reorderQueueItem, setQueueRunner };
+export { cancelDownloadsForTab, cancelQueued, enqueueDownload, queueState, reorderQueueItem, setQueueRunner };

@@ -5,6 +5,14 @@ export default defineContentScript({
   matches: ['*://*.vimeo.com/*'],
   runAt: 'document_idle',
   main() {
-    startVimeoContentScript();
+    let stop: (() => void) | undefined;
+    window.addEventListener('vidsy:start-vimeo', () => {
+      stop?.();
+      stop = startVimeoContentScript();
+    });
+    window.addEventListener('vidsy:stop-vimeo', () => {
+      stop?.();
+      stop = undefined;
+    });
   },
 });

@@ -53,11 +53,15 @@ describe('Live media downloads', function () {
           async () =>
             browser.execute(() => {
               const host = document.querySelector('#CEB-extension-all');
-              return Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).some(button =>
-                button.textContent?.includes('Download'),
+              return Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).some(
+                button => button.getAttribute('aria-label') === 'Show download options',
               );
             }),
-          { timeout: 120000, interval: 1000, timeoutMsg: 'No Download button found in content UI shadow root' },
+          {
+            timeout: 120000,
+            interval: 1000,
+            timeoutMsg: 'No compact download control found in content UI shadow root',
+          },
         );
       } catch (error) {
         const diagnostic = await browser.execute(() => ({
@@ -72,6 +76,26 @@ describe('Live media downloads', function () {
       }
       const clicked = await browser.execute(() => {
         const host = document.querySelector('#CEB-extension-all');
+        const button = Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).find(
+          element => element.getAttribute('aria-label') === 'Show download options',
+        );
+        if (!button) return false;
+        button.click();
+        return true;
+      });
+      expect(clicked).toBe(true);
+      await browser.waitUntil(
+        async () =>
+          browser.execute(() => {
+            const host = document.querySelector('#CEB-extension-all');
+            return Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).some(button =>
+              button.textContent?.includes('Download'),
+            );
+          }),
+        { timeout: 5000, interval: 100, timeoutMsg: 'Download panel did not open from compact control' },
+      );
+      const started = await browser.execute(() => {
+        const host = document.querySelector('#CEB-extension-all');
         const button = Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).find(element =>
           element.textContent?.includes('Download'),
         );
@@ -79,7 +103,7 @@ describe('Live media downloads', function () {
         button.click();
         return true;
       });
-      expect(clicked).toBe(true);
+      expect(started).toBe(true);
       const downloaded = await waitForCompletedFile(before);
       const info = await stat(join(downloadDirectory!, downloaded));
       expect(info.size).toBeGreaterThan(minimumBytes);

@@ -3,10 +3,10 @@ import { InterceptModal } from './components/InterceptModal';
 import { PillBar } from './components/PillBar';
 import { FONT } from './components/tokens';
 import { buildDownloadMessage } from './lib/download-request';
-import { ACTIVE_STAGES, pickBestVariant, qLabel, buildRows } from './lib/media-helpers';
+import { ACTIVE_STAGES, pickBestVariant, buildRows } from './lib/media-helpers';
 import { createLogger, MEDIA_MESSAGE, useStorage } from '@extension/shared';
 import { mediaDetectionsStorage, mediaDownloadsStorage, mediaSettingsStorage } from '@extension/storage';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { VideoEntry } from './lib/media-helpers';
 import type { MediaDownloadProgress, MediaItem, MediaVariant } from '@extension/shared';
 
@@ -63,14 +63,12 @@ const App = () => {
     });
     const ro = new ResizeObserver(measure);
     ro.observe(document.documentElement);
-    window.addEventListener('scroll', measure, true);
     window.addEventListener('resize', measure);
     measure();
     const t = setInterval(measure, 800);
     return () => {
       mo.disconnect();
       ro.disconnect();
-      window.removeEventListener('scroll', measure, true);
       window.removeEventListener('resize', measure);
       clearInterval(t);
     };
@@ -89,7 +87,50 @@ const App = () => {
     referrer?: string;
   } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const positionedVideoRef = useRef<HTMLVideoElement | null>(null);
+  const requestPositionRef = useRef<() => void>(() => {});
   const prevVideoRef = useRef<VideoEntry | undefined>(undefined);
+
+  /* Keep the overlay attached to its player without putting scroll updates
+     through React. This runs at most once per animation frame and only reads
+     the selected video's box before writing a compositor-friendly transform. */
+  useLayoutEffect(() => {
+    let frame: number | null = null;
+    const position = () => {
+      frame = null;
+      const overlay = ref.current;
+      const video = positionedVideoRef.current;
+      if (!overlay || !video) return;
+
+      const rect = video.getBoundingClientRect();
+      if (rect.top < 0 || rect.bottom <= 0 || rect.top >= window.innerHeight || rect.right <= 0) {
+        overlay.style.visibility = 'hidden';
+        return;
+      }
+
+      const x = Math.min(rect.right + 1, window.innerWidth - overlay.offsetWidth - 1);
+      overlay.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(rect.top)}px, 0)`;
+      overlay.style.visibility = 'visible';
+    };
+    const requestPosition = () => {
+      if (frame === null) frame = requestAnimationFrame(position);
+    };
+
+    requestPositionRef.current = requestPosition;
+    window.addEventListener('scroll', requestPosition, { capture: true, passive: true });
+    window.addEventListener('resize', requestPosition, { passive: true });
+    requestPosition();
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', requestPosition, true);
+      window.removeEventListener('resize', requestPosition);
+      requestPositionRef.current = () => {};
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    requestPositionRef.current();
+  }, [videos, isHovered, open, busyUrl]);
 
   /* Download intercept: background cancels a media download and asks us to
      show a modal so the user can route it through Vidsy or open in browser. */
@@ -170,11 +211,6 @@ const App = () => {
     [settings, tabId],
   );
 
-  const doCancel = useCallback(async (key: string) => {
-    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { key } });
-    setBusyUrl(null);
-  }, []);
-
   /* clear busyUrl once storage reports terminal stage */
   useEffect(() => {
     if (!busyUrl) return undefined;
@@ -230,42 +266,15 @@ const App = () => {
   if (effectiveVideo) {
     prevVideoRef.current = effectiveVideo;
   }
+  positionedVideoRef.current = effectiveVideo?.el ?? null;
 
   if (!effectiveVideo) return interceptModal;
 
-  const vr = effectiveVideo.rect;
-  const right = vr ? window.innerWidth - vr.right + 8 : 12;
-  const top = vr ? vr.top + 8 : 12;
-
   const prog = busyUrl ? downloads[busyUrl] : null;
-
-  /* percentage calc */
-  // mux/finalize stages run after byte download is 100%. If the libav build
-  // exposes ffmpeg_get_out_time_ms (it doesn't currently), muxPercent is set
-  // and we show it. Otherwise pct is null → the pill renders an indeterminate
-  // spinner instead of a stale "100%" that looks stuck.
-  const isMuxing = prog?.stage === 'mux' || prog?.stage === 'finalize';
-  const pct = isMuxing
-    ? (prog?.muxPercent ?? null)
-    : prog?.estimatedBytes
-      ? Math.min(100, Math.round((prog.downloadedBytes / prog.estimatedBytes) * 100))
-      : null;
-
-  const stageShort: Record<string, string> = {
-    init: 'Downloading…',
-    'fetch-manifest': 'Downloading…',
-    'download-video': 'Downloading…',
-    'download-audio': 'Downloading…',
-    mux: 'Processing…',
-    finalize: 'Saving…',
-    success: '✓ Done',
-    failed: '✗ Failed',
-  };
 
   const rows = buildRows(tabItems);
   const bestVariant = primary.variants?.length ? pickBestVariant(primary.variants) : undefined;
-  const bestUrl = bestVariant?.url ?? primary.variants?.[0]?.url ?? primary.url;
-  const bestQLabel = bestVariant ? qLabel(bestVariant) : '';
+  const expanded = isHovered || open;
 
   return (
     <>
@@ -273,36 +282,24 @@ const App = () => {
       <div
         ref={ref}
         onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        style={{ position: 'fixed', top, right, zIndex: 2147483647, pointerEvents: 'auto', fontFamily: FONT }}>
-        <PillBar
-          primary={primary}
-          isBusy={isBusy}
-          prog={prog}
-          pct={pct}
-          bestUrl={bestUrl}
-          bestQLabel={bestQLabel}
-          open={open}
-          stageShort={stageShort}
-          onMainClick={() => {
-            if (isBusy) {
-              if (activeItem) doCancel(activeItem.id);
-            } else {
-              doDownload(primary, bestVariant);
-            }
-          }}
-          onToggleOpen={() => setOpen(o => !o)}
-          onDismiss={() => setDismissed(true)}
-        />
+        onMouseLeave={() => {
+          setIsHovered(false);
+          setOpen(false);
+        }}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          zIndex: 2147483647,
+          pointerEvents: 'auto',
+          fontFamily: FONT,
+          visibility: 'hidden',
+          willChange: 'transform',
+        }}>
+        <PillBar isBusy={isBusy} prog={prog} onExpand={() => setOpen(true)} />
 
-        {open && !isBusy && (
-          <DropdownPanel
-            rows={rows}
-            primary={primary}
-            bestVariant={bestVariant}
-            bestQLabel={bestQLabel}
-            onDownload={doDownload}
-          />
+        {expanded && !isBusy && (
+          <DropdownPanel rows={rows} primary={primary} bestVariant={bestVariant} onDownload={doDownload} />
         )}
       </div>
     </>

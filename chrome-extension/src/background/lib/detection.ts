@@ -16,6 +16,13 @@ import {
 import { mediaDetectionsStorage } from '@extension/storage';
 import type { MediaItem, MediaVariant } from '@extension/shared';
 import { dlLog } from './logger';
+import type { TabWorkLifecycle } from './tab-work-lifecycle';
+
+let tabWorkLifecycle: TabWorkLifecycle | undefined;
+
+export const configureDetectionTabLifecycle = (lifecycle: TabWorkLifecycle) => {
+  tabWorkLifecycle = lifecycle;
+};
 
 // Convert a remote image URL to a data URL so it can be displayed in the popup
 // (the popup has COEP: require-corp which blocks cross-origin image loads)
@@ -47,7 +54,7 @@ const headProbedUrls = new Set<string>();
 // One-shot HEAD probe to learn Content-Length for an HTTP video/audio URL
 // the browser never fetched directly (e.g. an <a href> alt-quality download
 // link). Patches the item via upsertDetection on success. Silent on failure.
-const probeContentLength = async (url: string, tabId?: number, pageUrl?: string) => {
+const probeContentLength = async (url: string, tabId?: number, pageUrl?: string, generation?: number) => {
   if (headProbedUrls.has(url)) return;
   headProbedUrls.add(url);
   try {
@@ -56,7 +63,7 @@ const probeContentLength = async (url: string, tabId?: number, pageUrl?: string)
     const cl = res.headers.get('content-length');
     const bytes = cl ? Number(cl) : NaN;
     if (!Number.isFinite(bytes) || bytes < MIN_MEDIA_SIZE_BYTES) return;
-    await upsertDetection({ url, contentLength: bytes }, tabId, pageUrl);
+    await upsertDetection({ url, contentLength: bytes }, tabId, pageUrl, generation);
   } catch {
     // Server may reject HEAD, block CORS, or be offline — fine, just no size.
   }
@@ -392,7 +399,13 @@ const normalizeDetection = (candidate: Partial<MediaItem>, tabId?: number, pageU
   };
 };
 
-export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: number, pageUrl?: string) => {
+export const upsertDetection = async (
+  candidate: Partial<MediaItem>,
+  tabId?: number,
+  pageUrl?: string,
+  generation?: number,
+) => {
+  if (tabId !== undefined && generation !== undefined && !tabWorkLifecycle?.isCurrent(tabId, generation)) return;
   if (!candidate.url) {
     dlLog('detect.drop.missing_url', { tabId, pageUrl, candidate });
     return;
@@ -416,6 +429,7 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
   // Convert remote thumbnail URLs to data URLs upfront
   if (candidate.thumbnail && !candidate.thumbnail.startsWith('data:')) {
     const dataUrl = await fetchThumbnailAsDataUrl(candidate.thumbnail);
+    if (tabId !== undefined && generation !== undefined && !tabWorkLifecycle?.isCurrent(tabId, generation)) return;
     candidate.thumbnail = dataUrl ?? undefined;
   }
 
@@ -721,7 +735,7 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
     normalized.contentLength === undefined &&
     normalized.url.startsWith('http')
   ) {
-    void probeContentLength(normalized.url, tabId, pageUrl);
+    void probeContentLength(normalized.url, tabId, pageUrl, generation);
   }
 
   if (tabId !== undefined) {
@@ -842,7 +856,7 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
           }
         }
         if (merged.duration && !normalized.duration) patch.duration = merged.duration;
-        if (Object.keys(patch).length > 1) void upsertDetection(patch, tabId);
+        if (Object.keys(patch).length > 1) void upsertDetection(patch, tabId, undefined, generation);
       })
       .catch(() => undefined);
   }
@@ -878,6 +892,8 @@ export const clearTabDetections = async (tabId: number) => {
 export const handleNetworkDetection = async (details: chrome.webRequest.WebResponseHeadersDetails) => {
   const url = details.url;
   const tabId = details.tabId;
+  const generation = tabId === undefined ? undefined : tabWorkLifecycle?.generationForRunning(tabId);
+  if (tabId !== undefined && generation === undefined) return;
   dlLog('detect.network.received', {
     tabId,
     url,
@@ -933,7 +949,7 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
       url: fmp4.candidate.url,
     },
   });
-  if (fmp4.candidate) await upsertDetection(fmp4.candidate, tabId, pageUrl);
+  if (fmp4.candidate) await upsertDetection(fmp4.candidate, tabId, pageUrl, generation);
   if (fmp4.handled) return;
 
   const kind = deriveKind(url, contentType);
@@ -956,7 +972,7 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
       requestHeaders: findCapturedHeaders(url, undefined, tabId),
       mimeType: contentType,
     });
-    if (dashFmp4.candidate) await upsertDetection(dashFmp4.candidate, tabId, pageUrl);
+    if (dashFmp4.candidate) await upsertDetection(dashFmp4.candidate, tabId, pageUrl, generation);
     dlLog('detect.network.dash_segment', {
       tabId,
       url,
@@ -1046,6 +1062,7 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
     },
     tabId,
     pageUrl,
+    generation,
   );
 };
 

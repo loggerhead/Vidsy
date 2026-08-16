@@ -230,13 +230,22 @@ const deactivate = () => {
   label = null;
 };
 
-export const initPicker = () => {
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+export const initPicker = (): (() => void) => {
+  const onMessage = (
+    message: { type?: unknown },
+    _sender: chrome.runtime.MessageSender,
+    sendResponse: (response?: unknown) => void,
+  ) => {
     if (message?.type === MEDIA_MESSAGE.PICKER_ACTIVATE) {
       activate();
       sendResponse({ ok: true });
       return false;
     }
     return undefined;
-  });
+  };
+  chrome.runtime.onMessage.addListener(onMessage);
+  return () => {
+    deactivate();
+    chrome.runtime.onMessage.removeListener(onMessage);
+  };
 };

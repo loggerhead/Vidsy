@@ -3,10 +3,15 @@ import { createLogger } from '@extension/shared';
 import { initDeclaredMediaPresentationDetector } from './media-presentations';
 import { initPicker } from './picker';
 
-export const startAllContentScript = (): void => {
+export const startAllContentScript = (): (() => void) => {
   createLogger('content-all').info('started');
 
-  initMediaDetector();
-  initDeclaredMediaPresentationDetector();
-  initPicker();
+  const stopMediaDetector = initMediaDetector();
+  const stopPresentationDetector = initDeclaredMediaPresentationDetector();
+  const stopPicker = initPicker();
+  return () => {
+    stopPicker();
+    stopPresentationDetector();
+    stopMediaDetector();
+  };
 };

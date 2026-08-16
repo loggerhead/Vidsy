@@ -7,6 +7,14 @@ export default defineContentScript({
   world: 'MAIN',
   globalName: false,
   main() {
-    startYouTubeMainContentScript();
+    let stop: (() => void) | undefined;
+    window.addEventListener('vidsy:start-youtube-main', () => {
+      stop?.();
+      stop = startYouTubeMainContentScript();
+    });
+    window.addEventListener('vidsy:stop-youtube-main', () => {
+      stop?.();
+      stop = undefined;
+    });
   },
 });

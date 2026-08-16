@@ -7,6 +7,11 @@ type CapturedRequestHeaders = {
 };
 
 const capturedRequestHeaders = new Map<string, CapturedRequestHeaders>();
+let shouldCaptureTab = (_tabId: number): boolean => true;
+
+const configureHeaderCaptureTabFilter = (filter: (tabId: number) => boolean) => {
+  shouldCaptureTab = filter;
+};
 
 const filterCapturedHeaders = (headers: chrome.webRequest.HttpHeader[]) => {
   // Capture all critical anti-bot / CDN validation headers
@@ -32,7 +37,12 @@ const filterCapturedHeaders = (headers: chrome.webRequest.HttpHeader[]) => {
 const setupHeaderCapture = () => {
   chrome.webRequest.onSendHeaders.addListener(
     details => {
-      if (!details.requestHeaders || details.initiator?.startsWith('chrome-extension://')) return;
+      if (
+        !details.requestHeaders ||
+        details.initiator?.startsWith('chrome-extension://') ||
+        !shouldCaptureTab(details.tabId)
+      )
+        return;
       const headers = filterCapturedHeaders(details.requestHeaders);
       if (Object.keys(headers).length > 0) {
         capturedRequestHeaders.set(details.url, { timestamp: Date.now(), tabId: details.tabId, headers });
@@ -66,6 +76,12 @@ const findCapturedHeaders = (url: string, fallbackKey?: string, tabId?: number):
     }
   }
   return latest?.headers;
+};
+
+const clearCapturedHeadersForTab = (tabId: number) => {
+  for (const [url, captured] of capturedRequestHeaders) {
+    if (captured.tabId === tabId) capturedRequestHeaders.delete(url);
+  }
 };
 
 // ─── Session-scoped header injection via declarativeNetRequest ───
@@ -168,7 +184,9 @@ const cleanupStaleDnrRules = () => {
 
 export {
   capturedRequestHeaders,
+  configureHeaderCaptureTabFilter,
   findCapturedHeaders,
+  clearCapturedHeadersForTab,
   headersForDnr,
   setupHeaderCapture,
   injectHeadersForDownload,

@@ -150,10 +150,10 @@ const tryExtract = async () => {
   }
 };
 
-export const startVimeoContentScript = (): void => {
+export const startVimeoContentScript = (): (() => void) => {
   // BroadcastChannel bridge to receive playerConfig from MAIN world
   const bridge = createBridge(window.location.href);
-  onFromMain(bridge, msg => {
+  const stopBridge = onFromMain(bridge, msg => {
     if (msg.name === 'vimeo_on_config' && msg.data) {
       extractFromConfig((msg.data as { config: VimeoConfig }).config);
     }
@@ -161,10 +161,18 @@ export const startVimeoContentScript = (): void => {
   sendToMain(bridge, { name: 'vimeo_request_config', data: null });
 
   // Initial extraction
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const schedule = (callback: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+  };
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(() => void tryExtract(), 2000));
+    document.addEventListener('DOMContentLoaded', () => schedule(() => void tryExtract(), 2000), { once: true });
   } else {
-    setTimeout(() => void tryExtract(), 2000);
+    schedule(() => void tryExtract(), 2000);
   }
 
   // Vimeo uses pushState navigation
@@ -173,7 +181,7 @@ export const startVimeoContentScript = (): void => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       sentUrls.clear();
-      setTimeout(() => void tryExtract(), 2000);
+      schedule(() => void tryExtract(), 2000);
     }
   };
 
@@ -181,4 +189,11 @@ export const startVimeoContentScript = (): void => {
   navObserver.observe(document.documentElement, { childList: true, subtree: true });
 
   createLogger('vimeo').info('started');
+  return () => {
+    stopBridge();
+    bridge.close();
+    navObserver.disconnect();
+    timers.forEach(clearTimeout);
+    sentUrls.clear();
+  };
 };

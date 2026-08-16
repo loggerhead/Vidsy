@@ -42,15 +42,19 @@ export const sendToMain = (channel: BroadcastChannel, msg: BridgeMessage) => {
 };
 
 export const onFromMain = (channel: BroadcastChannel, handler: (msg: BridgeMessage) => void) => {
-  channel.addEventListener('message', (e: MessageEvent<BridgeEnvelope>) => {
+  const listener = (e: MessageEvent<BridgeEnvelope>) => {
     if (e.data?.direction === 'to-isolated') handler(e.data.msg);
-  });
+  };
+  channel.addEventListener('message', listener);
+  return () => channel.removeEventListener('message', listener);
 };
 
 export const onFromIsolated = (channel: BroadcastChannel, handler: (msg: BridgeMessage) => void) => {
-  channel.addEventListener('message', (e: MessageEvent<BridgeEnvelope>) => {
+  const listener = (e: MessageEvent<BridgeEnvelope>) => {
     if (e.data?.direction === 'to-main') handler(e.data.msg);
-  });
+  };
+  channel.addEventListener('message', listener);
+  return () => channel.removeEventListener('message', listener);
 };
 
 export type { BridgeMessage };

@@ -4,8 +4,8 @@ import App from '@src/matches/all/App';
 
 const HOST_ID = 'CEB-extension-all';
 
-export const startAllContentUi = (): void => {
-  initAppWithShadow({ id: HOST_ID, app: <App />, inlineCss });
+export const startAllContentUi = (): (() => void) => {
+  const stopApp = initAppWithShadow({ id: HOST_ID, app: <App />, inlineCss });
 
   // Make the host cover the full viewport, pointer-events passthrough
   const host = document.getElementById(HOST_ID);
@@ -20,4 +20,5 @@ export const startAllContentUi = (): void => {
       zIndex: '2147483647',
     });
   }
+  return stopApp;
 };

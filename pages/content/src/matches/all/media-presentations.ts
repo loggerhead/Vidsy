@@ -142,11 +142,13 @@ const kindFromUrl = (url: string): MediaKind => {
   return 'video';
 };
 
-const initDeclaredMediaPresentationDetector = () => {
+const initDeclaredMediaPresentationDetector = (): (() => void) => {
   const sent = new Set<string>();
   let scanQueued = false;
+  let disposed = false;
 
   const scan = () => {
+    if (disposed) return;
     scanQueued = false;
     const scripts = Array.from(document.scripts, script => script.textContent ?? '');
     for (const presentation of extractDeclaredMediaPresentations(scripts)) {
@@ -177,7 +179,7 @@ const initDeclaredMediaPresentationDetector = () => {
   };
 
   scan();
-  new MutationObserver(mutations => {
+  const observer = new MutationObserver(mutations => {
     const scriptChanged = mutations.some(mutation => {
       if (mutation.target instanceof HTMLScriptElement) return true;
       return Array.from(mutation.addedNodes).some(
@@ -186,7 +188,12 @@ const initDeclaredMediaPresentationDetector = () => {
       );
     });
     if (scriptChanged) queueScan();
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  return () => {
+    disposed = true;
+    observer.disconnect();
+  };
 };
 
 export { extractDeclaredMediaPresentations, initDeclaredMediaPresentationDetector };

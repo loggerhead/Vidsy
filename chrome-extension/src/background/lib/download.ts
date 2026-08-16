@@ -1,4 +1,4 @@
-import { cancelQueued, enqueueDownload, setQueueRunner } from './download-queue';
+import { cancelDownloadsForTab as cancelQueuedDownloadsForTab, cancelQueued, enqueueDownload, setQueueRunner } from './download-queue';
 import { browserDownloadTerminal } from './browser-download-state';
 import { findCapturedHeaders, injectHeadersForDownload, removeHeadersForDownload } from './header-capture';
 import { addHistoryEntry } from './history';
@@ -541,4 +541,8 @@ export const cancelDownload = (key: string) => {
   // clear progress. Otherwise the offscreen cancel below aborts the running mux.
   void cancelQueued(key);
   chrome.runtime.sendMessage({ type: 'offscreen/cancel', payload: { key } }).catch(() => undefined);
+};
+
+export const cancelDownloadsForTab = async (tabId: number) => {
+  await cancelQueuedDownloadsForTab(tabId);
 };

@@ -4,7 +4,7 @@ import type { MediaItem, MediaVariant } from '@extension/shared';
 // 1080×1920 portrait), not whichever side happens to be the height field.
 const shortEdgeLabel = (r: { width: number; height: number }) => `${Math.min(r.width, r.height)}p`;
 
-type Row = { label: string; sub: string; item: MediaItem; variant?: MediaVariant };
+type Row = { sub: string; item: MediaItem; variant?: MediaVariant };
 
 const topLevelQuality = (item: MediaItem): string => (item.resolution ? shortEdgeLabel(item.resolution) : '');
 
@@ -68,31 +68,28 @@ export const formatSeconds = (sec?: number): string => {
 
 export const buildRows = (items: MediaItem[]): Row[] => {
   const rows: Row[] = [];
-  let i = 1;
   for (const item of items) {
-    const title = (item.title ?? item.fileName ?? 'Video').slice(0, 44);
     const kt = kindStr(item.kind);
-    const duration = formatSeconds(item.duration);
 
     if (item.variants?.length) {
       for (const v of item.variants) {
-        // Prefer exact size (HTTP variants from HEAD/response); fall back to
-        // bandwidth × duration estimate (HLS/DASH) with a `~` marker.
+        // Prefer exact size (HTTP variants from HEAD/response); otherwise use
+        // bandwidth × duration as the displayed estimate.
         let sizeStr = '';
         if (v.contentLength) {
           sizeStr = formatBytes(v.contentLength);
         } else {
           const est = formatBytes(estimateBytes(v.bandwidth, item.duration));
-          if (est) sizeStr = `~${est}`;
+          if (est) sizeStr = est;
         }
-        const parts = [kt, duration, sizeStr, qLabel(v)].filter(Boolean);
-        rows.push({ label: `${i++}. ${title}`, sub: parts.join(' · '), item, variant: v });
+        const parts = [qLabel(v), kt, sizeStr].filter(Boolean);
+        rows.push({ sub: parts.join(' · '), item, variant: v });
       }
     } else {
       const size = formatBytes(item.contentLength);
       const q = topLevelQuality(item);
-      const parts = [kt, duration, size, q].filter(Boolean);
-      rows.push({ label: `${i++}. ${title}`, sub: parts.join(' · '), item, variant: undefined });
+      const parts = [q, kt, size].filter(Boolean);
+      rows.push({ sub: parts.join(' · '), item, variant: undefined });
     }
   }
   return rows;

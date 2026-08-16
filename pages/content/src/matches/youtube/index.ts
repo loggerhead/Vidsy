@@ -304,11 +304,19 @@ const extractFromScriptTag = (): number | undefined => {
   return undefined;
 };
 
-export const startYouTubeContentScript = (): void => {
+export const startYouTubeContentScript = (): (() => void) => {
   let mainWorldRelayReceived = false;
   const bridge = createBridge(window.location.href);
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const schedule = (callback: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+  };
 
-  onFromMain(bridge, msg => {
+  const stopBridge = onFromMain(bridge, msg => {
     if (msg.name === 'youtube_player_response') {
       const pr = (msg.data as { playerResponse?: PlayerResponse })?.playerResponse;
       if (pr?.streamingData) {
@@ -321,7 +329,7 @@ export const startYouTubeContentScript = (): void => {
 
   const tryExtract = async () => {
     sendToMain(bridge, { name: 'youtube_request_player_response', data: null });
-    setTimeout(() => {
+    schedule(() => {
       if (!mainWorldRelayReceived) {
         const sentCount = extractFromScriptTag();
         if (!sentCount) void tryAndroidVrFallback();
@@ -333,26 +341,37 @@ export const startYouTubeContentScript = (): void => {
   sendToMain(bridge, { name: 'youtube_request_player_response', data: null });
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(tryExtract, 800));
+    document.addEventListener('DOMContentLoaded', () => schedule(tryExtract, 800), { once: true });
   } else {
-    setTimeout(tryExtract, 800);
+    schedule(tryExtract, 800);
   }
 
-  document.addEventListener('yt-navigate-finish', () => {
+  const onNavigate = () => {
     sentUrls.clear();
     attemptedInnertubeVideoIds.clear();
     mainWorldRelayReceived = false;
-    setTimeout(() => void tryExtract(), 1200);
-  });
+    schedule(() => void tryExtract(), 1200);
+  };
+  document.addEventListener('yt-navigate-finish', onNavigate);
 
   let lastUrl = location.href;
-  new MutationObserver(() => {
+  const observer = new MutationObserver(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       sentUrls.clear();
       attemptedInnertubeVideoIds.clear();
       mainWorldRelayReceived = false;
-      setTimeout(() => void tryExtract(), 1200);
+      schedule(() => void tryExtract(), 1200);
     }
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  return () => {
+    stopBridge();
+    bridge.close();
+    observer.disconnect();
+    document.removeEventListener('yt-navigate-finish', onNavigate);
+    timers.forEach(clearTimeout);
+    sentUrls.clear();
+    attemptedInnertubeVideoIds.clear();
+  };
 };

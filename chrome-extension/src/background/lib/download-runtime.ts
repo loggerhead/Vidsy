@@ -37,6 +37,7 @@ export type DownloadDisplay = {
   title?: string;
   itemId?: string;
   pageUrl?: string;
+  tabId?: number;
 };
 
 export type DownloadSubmission = {
@@ -106,6 +107,7 @@ export type ExecutorCommand = {
   attempt: number;
   executionId: string;
   execution: DownloadExecutionSpec;
+  display: DownloadDisplay;
 };
 
 export type ExecutorAdapter = {
@@ -266,6 +268,7 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
         attempt: job.attempt,
         executionId: job.executionId,
         execution: job.execution,
+        display: job.display,
       };
       commands.push(command);
     }

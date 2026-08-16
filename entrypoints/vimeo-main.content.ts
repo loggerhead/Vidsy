@@ -7,6 +7,14 @@ export default defineContentScript({
   world: 'MAIN',
   globalName: false,
   main() {
-    startVimeoMainContentScript();
+    let stop: (() => void) | undefined;
+    window.addEventListener('vidsy:start-vimeo-main', () => {
+      stop?.();
+      stop = startVimeoMainContentScript();
+    });
+    window.addEventListener('vidsy:stop-vimeo-main', () => {
+      stop?.();
+      stop = undefined;
+    });
   },
 });

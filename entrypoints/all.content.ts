@@ -7,6 +7,14 @@ export default defineContentScript({
   allFrames: true,
   cssInjectionMode: 'manifest',
   main() {
-    startAllContentScript();
+    let stop: (() => void) | undefined;
+    window.addEventListener('vidsy:start-content', () => {
+      stop?.();
+      stop = startAllContentScript();
+    });
+    window.addEventListener('vidsy:stop-content', () => {
+      stop?.();
+      stop = undefined;
+    });
   },
 });

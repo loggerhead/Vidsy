@@ -2,6 +2,7 @@ import { createLogger, MEDIA_MESSAGE, stripTitleSuffix } from '@extension/shared
 import type { MediaKind } from '@extension/shared';
 
 const sentUrls = new Set<string>();
+let detectorActive = false;
 
 const contentUrl = (value: string): string => {
   try {
@@ -20,6 +21,7 @@ const contentLog = createLogger('content-detector').debug;
 let lastMainVideoPresent: boolean | null = null;
 
 const publishMainVideoPresence = (present: boolean) => {
+  if (!detectorActive) return;
   if (present === lastMainVideoPresent) return;
   lastMainVideoPresent = present;
   contentLog('main_video_presence', { present, url: location.href });
@@ -259,6 +261,7 @@ const probeUrlForResolution = (url: string) => {
   probe.addEventListener(
     'loadedmetadata',
     () => {
+      if (!detectorActive) return;
       if (probe.videoWidth > 0 && probe.videoHeight > 0) {
         contentLog('resolution_probe.loadedmetadata', {
           url: contentUrl(url),
@@ -284,6 +287,7 @@ const probeUrlForResolution = (url: string) => {
   probe.addEventListener(
     'error',
     () => {
+      if (!detectorActive) return;
       contentLog('resolution_probe.error', { url: contentUrl(url) });
       cleanup();
     },
@@ -299,6 +303,7 @@ const probeUrlForResolution = (url: string) => {
 
 // ─── Candidate sending ───
 const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: MediaKind }, el?: HTMLMediaElement) => {
+  if (!detectorActive) return;
   if (!candidate.url || !isLikelyMediaUrl(candidate.url)) {
     contentLog('candidate.drop.invalid_or_non_media', { url: candidate.url ? contentUrl(candidate.url) : '[empty]' });
     return;
@@ -392,6 +397,7 @@ const scheduleMseSend = (url: string, el: HTMLMediaElement) => {
   if (mseDeferTimer) clearTimeout(mseDeferTimer);
   mseDeferTimer = setTimeout(() => {
     mseDeferTimer = undefined;
+    if (!detectorActive) return;
     sendCandidate({ url, kind: 'mse' }, el);
   }, MSE_DEFER_MS);
 };
@@ -448,12 +454,16 @@ const collectFromElement = (el: HTMLMediaElement) => {
 };
 
 const registerElement = (el: HTMLMediaElement) => {
+  if (registeredElements.has(el)) return;
   const handler = () => collectFromElement(el);
   ['loadedmetadata', 'canplay', 'play', 'durationchange', 'timeupdate'].forEach(event => {
     el.addEventListener(event, handler, { passive: true, once: event === 'timeupdate' });
   });
+  registeredElements.set(el, handler);
   handler();
 };
+
+const registeredElements = new Map<HTMLMediaElement, EventListener>();
 
 const handleMutations = (mutations: MutationRecord[]) => {
   for (const mutation of mutations) {
@@ -474,7 +484,8 @@ const handleMutations = (mutations: MutationRecord[]) => {
   scanMainVideoPresence();
 };
 
-export const initMediaDetector = () => {
+export const initMediaDetector = (): (() => void) => {
+  detectorActive = true;
   document.querySelectorAll<HTMLMediaElement>('video, audio').forEach(registerElement);
   scanMainVideoPresence();
 
@@ -503,10 +514,28 @@ export const initMediaDetector = () => {
     }
   })();
 
-  if (isTopFrame) {
-    window.addEventListener('pagehide', () => {
+  const onPageHide = () => {
+    if (isTopFrame) {
       publishMainVideoPresence(false);
       chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CLEAR_TAB }).catch(() => undefined);
-    });
-  }
+    }
+  };
+  window.addEventListener('pagehide', onPageHide);
+
+  return () => {
+    detectorActive = false;
+    observer.disconnect();
+    window.removeEventListener('resize', scanMainVideoPresence);
+    window.removeEventListener('pagehide', onPageHide);
+    cancelMseSend();
+    for (const [element, handler] of registeredElements) {
+      ['loadedmetadata', 'canplay', 'play', 'durationchange', 'timeupdate'].forEach(event => {
+        element.removeEventListener(event, handler);
+      });
+    }
+    registeredElements.clear();
+    sentUrls.clear();
+    probedUrls.clear();
+    lastMainVideoPresent = null;
+  };
 };

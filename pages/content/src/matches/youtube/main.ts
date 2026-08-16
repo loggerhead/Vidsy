@@ -1,6 +1,6 @@
 import { createBridge, onFromIsolated, sendToIsolated } from '@src/lib/broadcast-bridge';
 
-export const startYouTubeMainContentScript = (): void => {
+export const startYouTubeMainContentScript = (): (() => void) => {
   const channel = createBridge(window.location.href);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,15 +13,28 @@ export const startYouTubeMainContentScript = (): void => {
     return true;
   };
 
-  onFromIsolated(channel, msg => {
+  const stopBridge = onFromIsolated(channel, msg => {
     if (msg.name === 'youtube_request_player_response') extractAndRelayPlayerResponse();
   });
 
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const schedule = (callback: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+  };
   if (!extractAndRelayPlayerResponse()) {
-    setTimeout(() => {
+    schedule(() => {
       if (!extractAndRelayPlayerResponse()) {
-        setTimeout(extractAndRelayPlayerResponse, 2000);
+        schedule(extractAndRelayPlayerResponse, 2000);
       }
     }, 500);
   }
+  return () => {
+    stopBridge();
+    channel.close();
+    timers.forEach(clearTimeout);
+  };
 };
