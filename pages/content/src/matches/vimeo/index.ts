@@ -1,4 +1,4 @@
-import { MEDIA_MESSAGE } from '@extension/shared';
+import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
 import { createBridge, onFromMain, sendToMain } from '@src/lib/broadcast-bridge';
 
 const sentUrls = new Set<string>();
@@ -150,33 +150,35 @@ const tryExtract = async () => {
   }
 };
 
-// BroadcastChannel bridge to receive playerConfig from MAIN world
-const bridge = createBridge(window.location.href);
-onFromMain(bridge, msg => {
-  if (msg.name === 'vimeo_on_config' && msg.data) {
-    extractFromConfig((msg.data as { config: VimeoConfig }).config);
-  }
-});
-sendToMain(bridge, { name: 'vimeo_request_config', data: null });
+export const startVimeoContentScript = (): void => {
+  // BroadcastChannel bridge to receive playerConfig from MAIN world
+  const bridge = createBridge(window.location.href);
+  onFromMain(bridge, msg => {
+    if (msg.name === 'vimeo_on_config' && msg.data) {
+      extractFromConfig((msg.data as { config: VimeoConfig }).config);
+    }
+  });
+  sendToMain(bridge, { name: 'vimeo_request_config', data: null });
 
-// Initial extraction
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => setTimeout(() => void tryExtract(), 2000));
-} else {
-  setTimeout(() => void tryExtract(), 2000);
-}
-
-// Vimeo uses pushState navigation
-let lastUrl = location.href;
-const checkNavigation = () => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    sentUrls.clear();
+  // Initial extraction
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(() => void tryExtract(), 2000));
+  } else {
     setTimeout(() => void tryExtract(), 2000);
   }
+
+  // Vimeo uses pushState navigation
+  let lastUrl = location.href;
+  const checkNavigation = () => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      sentUrls.clear();
+      setTimeout(() => void tryExtract(), 2000);
+    }
+  };
+
+  const navObserver = new MutationObserver(checkNavigation);
+  navObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+  createLogger('vimeo').info('started');
 };
-
-const navObserver = new MutationObserver(checkNavigation);
-navObserver.observe(document.documentElement, { childList: true, subtree: true });
-
-console.log('[Media Finder] Vimeo extractor loaded');

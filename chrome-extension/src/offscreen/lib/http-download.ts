@@ -1,9 +1,11 @@
 import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
+import { headersForFetch } from './hls-request';
+import { errorInfo, flowLog, safeUrl } from './download-log';
 import { describeDirectFile } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
 import { prepareOutputDelivery } from './output-delivery';
-import { updateProgress, clearProgress } from './progress';
+import { updateProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
 import {
   cancelWorkerJob,
@@ -33,14 +35,25 @@ type DownloadTransport = {
   fallbackReason?: string;
 };
 
-const probeRangeSupport = async (url: string, signal: AbortSignal): Promise<RangeProbe> => {
+const probeRangeSupport = async (
+  url: string,
+  signal: AbortSignal,
+  keyHeaders?: Record<string, string>,
+): Promise<RangeProbe> => {
   const timeoutSignal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   const combinedSignal = AbortSignal.any([signal, timeoutSignal]);
   const res = await fetch(url, {
     method: 'GET',
-    headers: { Range: 'bytes=0-0' },
+    headers: { ...headersForFetch(keyHeaders), Range: 'bytes=0-0' },
     signal: combinedSignal,
     credentials: 'include',
+  });
+  flowLog('http.probe.response', {
+    url: safeUrl(url),
+    status: res.status,
+    contentType: res.headers.get('content-type') ?? '',
+    contentLength: res.headers.get('content-length') ?? undefined,
+    contentRange: res.headers.get('content-range') ?? undefined,
   });
   await res.arrayBuffer().catch(() => undefined);
 
@@ -87,6 +100,7 @@ const downloadUrlToOpfs = async (args: {
   url: string;
   jobKey: string;
   opfsName: string;
+  headers?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
   signal: AbortSignal;
   maxConnections?: number;
@@ -94,12 +108,13 @@ const downloadUrlToOpfs = async (args: {
   onProgress?: (progress: ProgressUpdate) => void;
   onTransport?: (transport: DownloadTransport) => void | Promise<void>;
 }): Promise<{ file: File; contentType: string; totalBytes: number; transport: DownloadTransport }> => {
-  const { url, jobKey, opfsName, stage, signal } = args;
+  const { url, jobKey, opfsName, stage, signal, headers } = args;
+  flowLog('http.start', { url: safeUrl(url), stage, key: safeUrl(jobKey), headerNames: Object.keys(headers ?? {}) });
 
   let probe: RangeProbe | null = null;
   let fallbackReason: string | undefined;
   try {
-    probe = await probeRangeSupport(url, signal);
+    probe = await probeRangeSupport(url, signal, headers);
   } catch (err) {
     if (signal.aborted) throw err;
     probe = null;
@@ -120,6 +135,7 @@ const downloadUrlToOpfs = async (args: {
         jobKey,
         opfsName,
         url,
+        keyHeaders: headers,
         ranges,
         totalBytes: probe.totalBytes,
         stage,
@@ -133,6 +149,7 @@ const downloadUrlToOpfs = async (args: {
       if (signal.aborted) throw err;
       // Range-parallel failed; fall back to streaming.
       fallbackReason = err instanceof Error ? `Parallel ranges failed: ${err.message}` : 'Parallel ranges failed';
+      flowLog('http.range.fallback', { url: safeUrl(url), error: errorInfo(err) });
       try {
         await removeOpfs(opfsName);
       } catch {
@@ -151,11 +168,13 @@ const downloadUrlToOpfs = async (args: {
     totalBytes: probe?.totalBytes,
     fallbackReason,
   };
+  flowLog('http.transport', { url: safeUrl(url), ...transport });
   await args.onTransport?.(transport);
   const { totalBytes } = await fetchUrlToOpfs({
     jobKey,
     opfsName,
     url,
+    keyHeaders: headers,
     stage,
     reportProgress: args.reportProgress,
     onProgress: args.onProgress,
@@ -173,6 +192,7 @@ const downloadHttpDirect = async (
   url: string,
   key: string,
   output: 'mp4' | 'mp3' = 'mp4',
+  headers?: Record<string, string>,
 ): ReturnType<typeof prepareOutputDelivery> => {
   const abortController = new AbortController();
   activeAbortControllers.set(key, abortController);
@@ -185,15 +205,13 @@ const downloadHttpDirect = async (
   try {
     await updateProgress(key, { stage: 'download-video', downloadedBytes: 0 });
 
-    const {
-      file: inputFile,
-      totalBytes,
-    } = await downloadUrlToOpfs({
+    const { file: inputFile, totalBytes } = await downloadUrlToOpfs({
       url,
       jobKey: key,
       opfsName: inputOpfsName,
       stage: 'download-video',
       signal: abortController.signal,
+      headers,
       onTransport: value =>
         updateProgress(key, {
           stage: 'download-video',
@@ -206,6 +224,7 @@ const downloadHttpDirect = async (
     });
 
     const descriptor = await describeDirectFile(inputFile, 'direct');
+    flowLog('http.descriptor', { url: safeUrl(url), totalBytes, descriptor });
     const plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
 
     if (plan.type !== 'passthrough') {
@@ -227,15 +246,14 @@ const downloadHttpDirect = async (
 
       const outputFile = await getOpfsFile(outputOpfsName);
       const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
-      await clearProgress(key);
       return delivery;
     }
 
     outputOpfsName = inputOpfsName;
     const delivery = await prepareOutputDelivery({ file: inputFile, opfsName: outputOpfsName, plan });
-    await clearProgress(key);
     return delivery;
   } catch (err) {
+    flowLog('http.failed', { url: safeUrl(url), error: errorInfo(err) });
     if (inputBlobUrl) {
       try {
         URL.revokeObjectURL(inputBlobUrl);

@@ -30,6 +30,7 @@ export type FetchUrlRequest = {
   jobKey: JobKey;
   opfsName: string;
   url: string;
+  keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
 };
 
@@ -39,6 +40,7 @@ export type FetchRangesRequest = {
   jobKey: JobKey;
   opfsName: string;
   url: string;
+  keyHeaders?: Record<string, string>;
   ranges: { start: number; end: number }[];
   totalBytes: number;
   stage: 'download-video' | 'download-audio';

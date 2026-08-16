@@ -15,6 +15,7 @@ import {
 } from './media-utils';
 import { mediaDetectionsStorage } from '@extension/storage';
 import type { MediaItem, MediaVariant } from '@extension/shared';
+import { dlLog } from './logger';
 
 // Convert a remote image URL to a data URL so it can be displayed in the popup
 // (the popup has COEP: require-corp which blocks cross-origin image loads)
@@ -392,7 +393,20 @@ const normalizeDetection = (candidate: Partial<MediaItem>, tabId?: number, pageU
 };
 
 export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: number, pageUrl?: string) => {
-  if (!candidate.url) return;
+  if (!candidate.url) {
+    dlLog('detect.drop.missing_url', { tabId, pageUrl, candidate });
+    return;
+  }
+  dlLog('detect.upsert.start', {
+    tabId,
+    pageUrl,
+    url: candidate.url,
+    source: candidate.source,
+    kind: candidate.kind,
+    resolution: candidate.resolution,
+    variantCount: candidate.variants?.length ?? 0,
+    hasAudio: Boolean(candidate.audioUrl),
+  });
 
   // Normalize CDN byte-range URLs (e.g. Instagram's ?bytestart=...&byteend=...)
   // so each chunk of the same video collapses to a single entry and the
@@ -408,6 +422,15 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
   const tabKey = tabId !== undefined ? String(tabId) : 'unknown';
   let current = await getTabItems(tabKey);
   const normalizedCandidate = normalizeDetection(candidate, tabId, pageUrl);
+  dlLog('detect.upsert.normalized', {
+    tabId,
+    itemId: normalizedCandidate.id,
+    kind: normalizedCandidate.kind,
+    url: normalizedCandidate.url,
+    currentCount: current.length,
+    variantCount: normalizedCandidate.variants?.length ?? 0,
+    variants: normalizedCandidate.variants?.map(v => ({ resolution: v.resolution, url: v.url })),
+  });
 
   // A provider extractor that supplies a complete variants list is the
   // authority for that page's player. Its signed CDN URLs change on refresh,
@@ -429,6 +452,14 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
     const updated = [replacement, ...remaining].slice(0, 50);
     setTabItems(tabKey, updated);
     if (tabId !== undefined) updateBadge(tabId, updated.length);
+    dlLog('detect.upsert.authority', {
+      tabId,
+      itemId: replacement.id,
+      replacedItemId: counterpart?.id,
+      count: updated.length,
+      variantCount: replacement.variants?.length ?? 0,
+      variants: replacement.variants?.map(v => ({ resolution: v.resolution, url: v.url })),
+    });
     return;
   }
 
@@ -673,6 +704,14 @@ export const upsertDetection = async (candidate: Partial<MediaItem>, tabId?: num
   const updatedList = consolidateHttpVideoVariants(inserted);
   setTabItems(tabKey, updatedList);
   seenSet?.add(candidate.url);
+  dlLog('detect.upsert.inserted', {
+    tabId,
+    itemId: normalized.id,
+    count: updatedList.length,
+    kind: normalized.kind,
+    variantCount: normalized.variants?.length ?? 0,
+    variants: normalized.variants?.map(v => ({ resolution: v.resolution, url: v.url })),
+  });
 
   // HEAD probe for HTTP video/audio items the browser didn't fetch directly,
   // so the row can still display a size. HLS/DASH/MSS use the manifest path;
@@ -839,9 +878,25 @@ export const clearTabDetections = async (tabId: number) => {
 export const handleNetworkDetection = async (details: chrome.webRequest.WebResponseHeadersDetails) => {
   const url = details.url;
   const tabId = details.tabId;
-  if (tabId !== undefined && tabId < 0) return;
+  dlLog('detect.network.received', {
+    tabId,
+    url,
+    type: details.type,
+    initiator: details.initiator,
+    statusCode: details.statusCode,
+    responseHeaders: details.responseHeaders?.filter(h =>
+      ['content-type', 'content-length', 'content-range', 'accept-ranges'].includes(h.name.toLowerCase()),
+    ),
+  });
+  if (tabId !== undefined && tabId < 0) {
+    dlLog('detect.network.drop.invalid_tab', { tabId, url });
+    return;
+  }
   // Skip data: and chrome-extension: URLs
-  if (url.startsWith('data:') || url.startsWith('chrome-extension:') || url.startsWith('chrome:')) return;
+  if (url.startsWith('data:') || url.startsWith('chrome-extension:') || url.startsWith('chrome:')) {
+    dlLog('detect.network.drop.internal_url', { tabId, url });
+    return;
+  }
 
   const contentType = details.responseHeaders?.find(h => h.name.toLowerCase() === 'content-type')?.value;
   const contentLengthHeader = details.responseHeaders?.find(h => h.name.toLowerCase() === 'content-length')?.value;
@@ -866,12 +921,31 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
     requestHeaders: findCapturedHeaders(url, undefined, tabId),
     mimeType: contentType,
   });
+  dlLog('detect.network.fmp4_result', {
+    tabId,
+    url,
+    handled: fmp4.handled,
+    hasCandidate: Boolean(fmp4.candidate),
+    candidate: fmp4.candidate && {
+      kind: fmp4.candidate.kind,
+      resolution: fmp4.candidate.resolution,
+      contentLength: fmp4.candidate.contentLength,
+      url: fmp4.candidate.url,
+    },
+  });
   if (fmp4.candidate) await upsertDetection(fmp4.candidate, tabId, pageUrl);
   if (fmp4.handled) return;
 
   const kind = deriveKind(url, contentType);
-  if (kind === 'other') return;
-  if (isHlsSegment(url, contentType)) return;
+  dlLog('detect.network.classified', { tabId, url, kind, contentType, contentLength, pageUrl });
+  if (kind === 'other') {
+    dlLog('detect.network.drop.other', { tabId, url });
+    return;
+  }
+  if (isHlsSegment(url, contentType)) {
+    dlLog('detect.network.drop.hls_segment', { tabId, url });
+    return;
+  }
 
   if (isDashSegment(url, contentType)) {
     const dashFmp4 = await handleFmp4RangeDetection({
@@ -883,11 +957,18 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
       mimeType: contentType,
     });
     if (dashFmp4.candidate) await upsertDetection(dashFmp4.candidate, tabId, pageUrl);
+    dlLog('detect.network.dash_segment', {
+      tabId,
+      url,
+      handled: dashFmp4.handled,
+      hasCandidate: Boolean(dashFmp4.candidate),
+    });
     return;
   }
 
   // Skip small payloads for direct media (not manifests) — avoids tracker noise
   if ((kind === 'video' || kind === 'audio') && contentLength !== undefined && contentLength < MIN_MEDIA_SIZE_BYTES) {
+    dlLog('detect.network.drop.small_media', { tabId, url, kind, contentLength });
     return;
   }
 
@@ -897,6 +978,13 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
     const parsed = await parseHlsVariants(url);
     variants = parsed.variants;
     isDrmProtected = parsed.isDrmProtected;
+    dlLog('detect.manifest.hls_parsed', {
+      tabId,
+      url,
+      variantCount: variants.length,
+      variants: variants.map(v => ({ resolution: v.resolution, bandwidth: v.bandwidth, url: v.url })),
+      isDrmProtected,
+    });
     if (variants && variants.length > 1) {
       variants = variants.slice().sort((a, b) => {
         const aRes = a.resolution?.height ?? 0;
@@ -927,6 +1015,13 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
     const parsed = await parseDashVariants(url);
     variants = parsed.variants;
     isDrmProtected = parsed.isDrmProtected;
+    dlLog('detect.manifest.dash_parsed', {
+      tabId,
+      url,
+      variantCount: variants.length,
+      variants: variants.map(v => ({ resolution: v.resolution, bandwidth: v.bandwidth, codecs: v.codecs, url: v.url })),
+      isDrmProtected,
+    });
     if (variants && variants.length > 1) {
       variants = variants.slice().sort((a, b) => {
         const aRes = a.resolution?.height ?? 0;

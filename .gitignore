@@ -8,6 +8,8 @@
 **/dist
 **/build
 **/dist-zip
+.output/
+.wxt/
 chrome-extension/manifest.js
 chrome-extension/pre-build.tsconfig.tsbuildinfo
 tsconfig.tsbuildinfo
@@ -25,6 +27,9 @@ chrome-extension/public/ffmpeg/ffmpeg-core.worker.js
 .DS_Store
 .idea
 **/.turbo
+.e2e-artifacts
+.e2e-private
+.playwright-cli/
 
 # compiled
 **/tailwind-output.css

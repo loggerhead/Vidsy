@@ -4,6 +4,7 @@
 
 import { installLibAVGlobals } from './libav-globals';
 import { opfs } from './opfs';
+import { createLogger } from '@extension/shared';
 import type { LibAVInstance } from './libav-types';
 
 // libav.js ships two layered modules per variant:
@@ -37,6 +38,7 @@ type LibAVWrapper = {
 };
 
 let wrapperPromise: Promise<LibAVWrapper> | null = null;
+const log = createLogger('libav');
 
 const loadWrapper = async (): Promise<LibAVWrapper> => {
   if (wrapperPromise) return wrapperPromise;
@@ -82,10 +84,10 @@ export const registerOutputDevice = async (libav: LibAVInstance, opfsName: strin
       writeCount++;
       bytesWritten += buf.byteLength;
       if (writeCount === 1 || writeCount % 100 === 0) {
-        console.log('[libav] output write', { writeCount, position: pos, byteLength: buf.byteLength, bytesWritten });
+        log.debug('output.write', { writeCount, position: pos, byteLength: buf.byteLength, bytesWritten });
       }
     } catch (err) {
-      console.error('[libav] output write failed', {
+      log.error('output.write_failed', {
         position: pos,
         byteLength: buf.byteLength,
         errorName: err instanceof Error ? err.name : 'UnknownError',
@@ -93,9 +95,9 @@ export const registerOutputDevice = async (libav: LibAVInstance, opfsName: strin
       throw err;
     }
   };
-  console.log('[libav] registering writer device');
+  log.debug('output.registering_writer');
   await libav.mkwriterdev(opfsName);
-  console.log('[libav] writer device ready');
+  log.debug('output.writer_ready');
 };
 
 // jsfetch tunables — sensible defaults for HLS/DASH fetching. All are milliseconds.

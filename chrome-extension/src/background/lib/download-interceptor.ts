@@ -313,7 +313,7 @@ const openDownloadsWindow = async (key: string): Promise<void> => {
       downloadWindowIds.delete(key);
     }
   }
-  const url = `popup/index.html?dlKey=${encodeURIComponent(key)}#download-details`;
+  const url = `popup.html?dlKey=${encodeURIComponent(key)}#download-details`;
   const win = await chrome.windows.create({
     url: chrome.runtime.getURL(url),
     type: 'popup',

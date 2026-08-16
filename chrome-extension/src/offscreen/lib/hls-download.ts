@@ -5,7 +5,7 @@ import { describeHls } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
 import { prepareOutputDelivery } from './output-delivery';
-import { updateProgress, clearProgress } from './progress';
+import { updateProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
 import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs } from './worker-client';
 
@@ -95,7 +95,6 @@ export const downloadHlsMuxed = async (
           expectedDurationSeconds: durationSeconds,
         });
         inputOpfsName = null; // hand-off: do not remove on cleanup
-        await clearProgress(key);
         return delivery;
       }
 
@@ -128,7 +127,6 @@ export const downloadHlsMuxed = async (
       plan,
       expectedDurationSeconds: durationSeconds,
     });
-    await clearProgress(key);
     return delivery;
   } catch (err) {
     if (inputBlobUrl) {

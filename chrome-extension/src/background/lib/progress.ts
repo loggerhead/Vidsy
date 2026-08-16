@@ -1,4 +1,5 @@
 import { mediaDownloadsStorage } from '@extension/storage';
+import { dlLog } from './logger';
 import type { ChunkProgress, MediaDownloadProgress, MediaDownloadState, MediaItem } from '@extension/shared';
 
 type ProgressUpdate = {
@@ -57,9 +58,20 @@ export const updateProgress = async (key: string, progress: ProgressUpdate, cont
   };
   const next: MediaDownloadState = { ...current, [key]: entry };
   await mediaDownloadsStorage.set(next);
+  if (!existing || existing.stage !== progress.stage || progress.stage === 'success' || progress.stage === 'failed') {
+    dlLog('progress.stage', {
+      key,
+      from: existing?.stage,
+      to: progress.stage,
+      downloadedBytes: progress.downloadedBytes,
+      estimatedBytes: progress.estimatedBytes ?? existing?.estimatedBytes,
+      error: progress.error,
+    });
+  }
 };
 
 export const clearProgress = async (key: string) => {
+  dlLog('progress.clear', { key });
   await mediaDownloadsStorage.set(prev => {
     const next = { ...prev };
     delete next[key];

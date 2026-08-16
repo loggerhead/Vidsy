@@ -89,7 +89,7 @@ export const useMediaPage = () => {
 
   const onDownload = async (item: MediaItem, outputFormat?: 'mp4' | 'mp3') => {
     setMoreMenuId(null);
-    setDownloadState({ busyUrl: item.url, error: null });
+    setDownloadState({ busyUrl: item.id, error: null });
     const chosenVariant =
       item.variants && item.variants.length > 0
         ? (item.variants.find(v => v.url === selectedVariants[item.id]) ?? item.variants[0])
@@ -112,7 +112,7 @@ export const useMediaPage = () => {
       type: MEDIA_MESSAGE.DOWNLOAD,
       payload: {
         url: chosenUrl,
-        key: item.url,
+        key: item.id,
         kind: item.kind,
         fileName: item.fileName,
         title: item.title,
@@ -130,13 +130,13 @@ export const useMediaPage = () => {
     }
   };
 
-  const onCancel = async (url: string) => {
-    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { url, intent: 'cancel' } });
+  const onCancel = async (key: string) => {
+    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { key, intent: 'cancel' } });
     setDownloadState({ busyUrl: null, error: null });
   };
 
-  const onPause = async (url: string) => {
-    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { url, intent: 'pause' } });
+  const onPause = async (key: string) => {
+    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { key, intent: 'pause' } });
     setDownloadState({ busyUrl: null, error: null });
   };
 

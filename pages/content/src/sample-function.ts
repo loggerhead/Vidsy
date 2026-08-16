@@ -1,3 +1,5 @@
+import { createLogger } from '@extension/shared';
+
 export const sampleFunction = () => {
-  console.log('content script - sampleFunction() called from another module');
+  createLogger('content-sample').debug('called');
 };

@@ -5,12 +5,13 @@ import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 
 const extName = IS_FIREFOX ? '.xpi' : '.zip';
-const extensions = await readdir(join(import.meta.dirname, '../../../dist-zip'));
+const extensions = await readdir(join(import.meta.dirname, '../../../.output'));
 const latestExtension = extensions
-  .filter(file => extname(file) === extName)
+  .filter(file => extname(file) === extName && file.includes(`-${IS_FIREFOX ? 'firefox' : 'chrome'}`))
   .sort()
   .at(-1);
-const extPath = join(import.meta.dirname, `../../../dist-zip/${latestExtension}`);
+if (!latestExtension) throw new Error(`No WXT ${IS_FIREFOX ? 'Firefox' : 'Chrome'} zip found in .output; run pnpm zip first.`);
+const extPath = join(import.meta.dirname, `../../../.output/${latestExtension}`);
 const bundledExtension = (await readFile(extPath)).toString('base64');
 const downloadDirectory = resolve(
   process.env.VIDSY_E2E_DOWNLOAD_DIR ?? join(import.meta.dirname, '../../../.e2e-downloads'),

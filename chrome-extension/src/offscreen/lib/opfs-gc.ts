@@ -6,6 +6,10 @@
 // worker died with it, so no in-flight download could have survived.
 // Safe to wipe everything.
 
+import { createLogger } from '@extension/shared';
+
+const log = createLogger('opfs');
+
 type DirHandleWithKeys = FileSystemDirectoryHandle & {
   keys(): AsyncIterableIterator<string>;
 };
@@ -29,7 +33,7 @@ export const purgeOpfsOrphans = async (): Promise<{ removed: number; failed: num
       }
     }
   } catch (err) {
-    console.warn('[Vidsy] OPFS GC failed:', err);
+    log.warn('gc_failed', err);
   }
   return { removed, failed };
 };

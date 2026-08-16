@@ -4,13 +4,14 @@ import { PillBar } from './components/PillBar';
 import { FONT } from './components/tokens';
 import { buildDownloadMessage } from './lib/download-request';
 import { ACTIVE_STAGES, pickBestVariant, qLabel, buildRows } from './lib/media-helpers';
-import { MEDIA_MESSAGE, useStorage } from '@extension/shared';
+import { createLogger, MEDIA_MESSAGE, useStorage } from '@extension/shared';
 import { mediaDetectionsStorage, mediaDownloadsStorage, mediaSettingsStorage } from '@extension/storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VideoEntry } from './lib/media-helpers';
 import type { MediaDownloadProgress, MediaItem, MediaVariant } from '@extension/shared';
 
 const App = () => {
+  const log = createLogger('content-ui');
   const detections = useStorage(mediaDetectionsStorage);
   const rawDownloads = useStorage(mediaDownloadsStorage);
   const downloads = useMemo(() => (rawDownloads ?? {}) as Record<string, MediaDownloadProgress>, [rawDownloads]);
@@ -124,19 +125,53 @@ const App = () => {
   /* download helpers */
   const doDownload = useCallback(
     async (item: MediaItem, variant?: MediaVariant) => {
+      log.debug('download.click', {
+        itemId: item.id,
+        variantIndex: variant ? item.variants?.findIndex(v => v.url === variant.url) : undefined,
+        kind: item.kind,
+        itemUrl: (() => {
+          try {
+            const url = new URL(variant?.url ?? item.url);
+            return `${url.origin}${url.pathname}`;
+          } catch {
+            return '[invalid-url]';
+          }
+        })(),
+        resolution: variant?.resolution ?? item.resolution,
+        hasAudio: Boolean(variant?.audioUrl ?? item.audioUrl),
+      });
       // MSE-fed players have no fetchable source — the badge still shows so the
       // user knows we saw the video, but the action is a no-op.
-      if (item.kind === 'mse') return;
-      setBusyUrl(item.url);
+      if (item.kind === 'mse') {
+        log.warn('download.skipped_mse');
+        return;
+      }
+      setBusyUrl(item.id);
       setOpen(false);
-      await chrome.runtime.sendMessage(buildDownloadMessage(item, variant, tabId, settings?.enableHlsMerging));
+      try {
+        const response = await chrome.runtime.sendMessage(
+          buildDownloadMessage(item, variant, tabId, settings?.enableHlsMerging),
+        );
+        log.debug('download.response', {
+          itemId: item.id,
+          ok: response?.ok,
+          queued: response?.queued,
+          error: response?.error,
+        });
+      } catch (error) {
+        log.error('download.send_failed', {
+          itemId: item.id,
+          name: error instanceof Error ? error.name : 'UnknownError',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
       // Keep busyUrl until storage reports success/fail
     },
     [settings, tabId],
   );
 
-  const doCancel = useCallback(async (url: string) => {
-    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { url } });
+  const doCancel = useCallback(async (key: string) => {
+    await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { key } });
     setBusyUrl(null);
   }, []);
 
@@ -167,9 +202,13 @@ const App = () => {
   /* active progress */
   const primary = tabItems[0];
   const activeItem = busyUrl
-    ? tabItems.find(it => it.url === busyUrl)
+    ? (tabItems.find(it => it.id === busyUrl) ??
+      tabItems.find(it => {
+        const stage = downloads[busyUrl]?.stage;
+        return stage != null && ACTIVE_STAGES.has(stage) && it.kind !== 'mse';
+      }))
     : tabItems.find(it => {
-        const p = downloads[it.url];
+        const p = downloads[it.id];
         return p != null && ACTIVE_STAGES.has(p.stage);
       });
   const isBusy = !!activeItem;
@@ -198,7 +237,7 @@ const App = () => {
   const right = vr ? window.innerWidth - vr.right + 8 : 12;
   const top = vr ? vr.top + 8 : 12;
 
-  const prog = activeItem ? (downloads[activeItem.url] ?? null) : null;
+  const prog = busyUrl ? downloads[busyUrl] : null;
 
   /* percentage calc */
   // mux/finalize stages run after byte download is 100%. If the libav build
@@ -247,7 +286,7 @@ const App = () => {
           stageShort={stageShort}
           onMainClick={() => {
             if (isBusy) {
-              if (activeItem) doCancel(activeItem.url);
+              if (activeItem) doCancel(activeItem.id);
             } else {
               doDownload(primary, bestVariant);
             }

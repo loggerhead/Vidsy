@@ -1,10 +1,11 @@
 import { downloadUrlToOpfs } from './http-download';
+import { errorInfo, flowLog, safeUrl } from './download-log';
 import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
 import { describeDirectFile, mergeTrackDescriptors } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
 import { prepareOutputDelivery } from './output-delivery';
-import { updateProgress, clearProgress } from './progress';
+import { updateProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
 import { cancelWorkerJob, getOpfsFile, readMaxConnections, removeOpfs } from './worker-client';
 import type { DownloadTransport } from './http-download';
@@ -38,7 +39,14 @@ export const downloadMerged = async (
   videoMimeType: string | undefined,
   audioMimeType: string | undefined,
   key: string,
+  headers?: Record<string, string>,
 ): ReturnType<typeof prepareOutputDelivery> => {
+  flowLog('merged.start', {
+    videoUrl: safeUrl(videoUrl),
+    audioUrl: safeUrl(audioUrl),
+    key: safeUrl(key),
+    headerNames: Object.keys(headers ?? {}),
+  });
   const abortController = new AbortController();
   activeAbortControllers.set(key, abortController);
   abortController.signal.addEventListener('abort', () => cancelWorkerJob(key));
@@ -121,6 +129,7 @@ export const downloadMerged = async (
         opfsName: videoOpfsName,
         stage: 'download-video',
         signal: abortController.signal,
+        headers,
         maxConnections: videoConnections,
         reportProgress: false,
         onProgress: progressFor('video'),
@@ -130,6 +139,11 @@ export const downloadMerged = async (
       tracks.video.estimatedBytes = result.totalBytes;
       tracks.video.activeConnections = 0;
       tracks.video.done = true;
+      flowLog('merged.video.done', {
+        url: safeUrl(videoUrl),
+        totalBytes: result.totalBytes,
+        transport: result.transport,
+      });
       await publishCombinedProgress();
       return result;
     };
@@ -140,6 +154,7 @@ export const downloadMerged = async (
         opfsName: audioOpfsName,
         stage: 'download-audio',
         signal: abortController.signal,
+        headers,
         maxConnections: audioConnections,
         reportProgress: false,
         onProgress: progressFor('audio'),
@@ -149,6 +164,11 @@ export const downloadMerged = async (
       tracks.audio.estimatedBytes = result.totalBytes;
       tracks.audio.activeConnections = 0;
       tracks.audio.done = true;
+      flowLog('merged.audio.done', {
+        url: safeUrl(audioUrl),
+        totalBytes: result.totalBytes,
+        transport: result.transport,
+      });
       await publishCombinedProgress();
       return result;
     };
@@ -193,6 +213,7 @@ export const downloadMerged = async (
       await describeDirectFile(audioDownload.file, 'separate-tracks', audioMimeType),
     ]);
     const plan = requireExecutablePlan(planMediaProcessing(descriptor, 'media'));
+    flowLog('merged.plan', { descriptor, plan });
     if (plan.type === 'passthrough' || plan.type === 'concatenate-fmp4') {
       throw new Error(`Unexpected ${plan.type} plan for separate media tracks`);
     }
@@ -221,9 +242,10 @@ export const downloadMerged = async (
 
     const outputFile = await getOpfsFile(outputOpfsName);
     const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
-    await clearProgress(key);
+    flowLog('merged.done', { outputBytes: delivery.artifact.size, output: plan.output });
     return delivery;
   } catch (err) {
+    flowLog('merged.failed', { videoUrl: safeUrl(videoUrl), audioUrl: safeUrl(audioUrl), error: errorInfo(err) });
     if (videoBlobUrl) {
       try {
         URL.revokeObjectURL(videoBlobUrl);

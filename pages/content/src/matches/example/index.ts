@@ -1,5 +1,8 @@
 import { sampleFunction } from '@src/sample-function';
+import { createLogger } from '@extension/shared';
 
-console.log('[CEB] Example content script loaded');
+export const startExampleContentScript = (): void => {
+  createLogger('content-example').info('started');
 
-void sampleFunction();
+  void sampleFunction();
+};

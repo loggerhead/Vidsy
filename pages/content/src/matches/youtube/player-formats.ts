@@ -1,6 +1,7 @@
 import type { MediaVariant } from '@extension/shared';
 
 type YouTubeFormat = {
+  itag?: number;
   url?: string;
   mimeType?: string;
   qualityLabel?: string;
@@ -79,5 +80,8 @@ const extractYouTubeMedia = (response: YouTubePlayerResponse): YouTubeMedia | un
   return { title: response.videoDetails?.title, primary, variants };
 };
 
-export { extractYouTubeMedia };
+const hasDirectAdaptiveVideo = (response: YouTubePlayerResponse): boolean =>
+  (response.streamingData?.adaptiveFormats ?? []).some(format => !!format.url && format.mimeType?.startsWith('video/'));
+
+export { extractYouTubeMedia, hasDirectAdaptiveVideo };
 export type { YouTubeFormat, YouTubeMedia, YouTubePlayerResponse };

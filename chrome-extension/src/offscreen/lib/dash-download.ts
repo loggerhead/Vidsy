@@ -9,7 +9,7 @@ import { describeDash, describeDirectFile, mergeTrackDescriptors } from './media
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
 import { prepareOutputDelivery } from './output-delivery';
-import { updateProgress, clearProgress } from './progress';
+import { updateProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
 import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs } from './worker-client';
 
@@ -286,7 +286,6 @@ export const downloadDashMuxed = async (
       plan,
       expectedDurationSeconds: durationSeconds,
     });
-    await clearProgress(key);
     return delivery;
   } catch (err) {
     if (videoBlobUrl) {

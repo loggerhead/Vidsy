@@ -57,7 +57,7 @@ export const MediaCard = ({
   editName: string;
   setEditName: (name: string) => void;
   onDownload: (item: MediaItem, fmt?: 'mp4' | 'mp3') => void;
-  onCancel: (url: string) => void;
+  onCancel: (key: string) => void;
   startEdit: (item: MediaItem) => void;
   copyUrl: (url: string) => void;
   onDismiss: () => void;
@@ -92,7 +92,7 @@ export const MediaCard = ({
     'finalize',
   ]);
   const progress = downloads[item.url];
-  const isBusy = downloadState.busyUrl === item.url || (progress != null && ACTIVE_STAGES.has(progress.stage));
+  const isBusy = downloadState.busyUrl === item.id || (progress != null && ACTIVE_STAGES.has(progress.stage));
   const isComplete = progress?.stage === 'success' && progress.downloadId;
 
   const selectedVariantUrl = selectedVariants[item.id];
@@ -271,7 +271,7 @@ export const MediaCard = ({
                     ? 'bg-red-100 text-red-600 hover:bg-red-200'
                     : 'bg-red-500/15 text-red-400 hover:bg-red-500/25',
                 )}
-                onClick={() => onCancel(item.url)}>
+                onClick={() => onCancel(item.id)}>
                 Stop
               </button>
             </div>

@@ -36,6 +36,12 @@ const recordBrowserDownloadTerminal = async (delta: chrome.downloads.DownloadDel
   if (state !== 'in_progress' && state !== 'complete' && state !== 'interrupted') return;
   const terminal = browserDownloadTerminal(state, delta.error?.current);
   if (!terminal) return;
+  dlLog('browser_download.terminal', {
+    downloadId: delta.id,
+    state,
+    error: delta.error?.current,
+    fileSize: delta.fileSize?.current,
+  });
   const existing = terminalDownloadUpdates.get(delta.id);
   if (existing) return existing;
 
@@ -241,12 +247,13 @@ const downloadMergedCall = async (
   key: string,
   videoMimeType?: string,
   audioMimeType?: string,
+  headers?: Record<string, string>,
 ) => {
   dlLog('downloadMergedCall: start', { videoUrl, audioUrl, key });
   await ensureOffscreen();
   const res = await sendMessageWithRetry({
     type: 'offscreen/download-blob',
-    payload: { kind: 'merged', url: videoUrl, audioUrl, fileName, key, videoMimeType, audioMimeType },
+    payload: { kind: 'merged', url: videoUrl, audioUrl, fileName, key, videoMimeType, audioMimeType, headers },
   });
   if (chrome.runtime.lastError) throw chrome.runtime.lastError;
   if (!res?.ok) throw new Error(res?.error || 'Merged download failed in offscreen');
@@ -295,7 +302,16 @@ const downloadDashMuxed = async (
 type DownloadPayload = Extract<MediaMessage, { type: typeof MEDIA_MESSAGE.DOWNLOAD }>['payload'];
 
 const runDownloadJob = async (payload: DownloadPayload) => {
-  dlLog('runDownloadJob: starting', payload);
+  dlLog('runDownloadJob: starting', {
+    key: payload.key,
+    itemId: payload.item?.id,
+    url: payload.url,
+    kind: payload.kind,
+    resolution: payload.item?.resolution,
+    variantCount: payload.item?.variants?.length ?? 0,
+    hasAudio: Boolean(payload.audioUrl),
+    outputFormat: payload.outputFormat,
+  });
 
   const settings = await mediaSettingsStorage.get();
 
@@ -377,7 +393,16 @@ const runDownloadJob = async (payload: DownloadPayload) => {
     const shouldMergeDash = isDashKind(payload.kind, payload.url) && settings.enableHlsMerging;
     const shouldMergeAV = !!payload.audioUrl && !shouldMergeHls && !shouldMergeDash;
 
-    dlLog('handleDownload: processing strategy', { shouldMergeHls, shouldMergeDash, shouldMergeAV });
+    dlLog('handleDownload: processing strategy', {
+      key,
+      itemId: mediaItem.id,
+      shouldMergeHls,
+      shouldMergeDash,
+      shouldMergeAV,
+      kind: payload.kind,
+      url: payload.url,
+      audioUrl: payload.audioUrl ? '[present]' : undefined,
+    });
 
     const downloadId = shouldMergeHls
       ? await downloadHlsMuxed(payload.url, fileName, outputFormat, key, captured)
@@ -391,6 +416,7 @@ const runDownloadJob = async (payload: DownloadPayload) => {
               key,
               payload.item?.mimeType,
               payload.audioMimeType,
+              captured,
             )
           : await downloadDirect(payload.url, fileName, key, outputFormat, captured);
 
@@ -439,7 +465,15 @@ const runDownloadJob = async (payload: DownloadPayload) => {
 setQueueRunner(runDownloadJob);
 
 export const handleDownload = async (payload: DownloadPayload) => {
-  dlLog('handleDownload: enqueue request', payload);
+  dlLog('handleDownload: enqueue request', {
+    key: payload.key,
+    itemId: payload.item?.id,
+    url: payload.url,
+    kind: payload.kind,
+    resolution: payload.item?.resolution,
+    variantCount: payload.item?.variants?.length ?? 0,
+    hasAudio: Boolean(payload.audioUrl),
+  });
 
   // Subtitle fast-path: small text blobs, no offscreen, no progress state, no headers.
   // Route straight to chrome.downloads with a language-suffixed filename. These don't
@@ -487,6 +521,12 @@ export const handleDownload = async (payload: DownloadPayload) => {
       };
 
   await enqueueDownload(payload, queuedItem);
+  dlLog('handleDownload: enqueued', {
+    key: payload.key ?? payload.url,
+    itemId: queuedItem.id,
+    url: queuedItem.url,
+    kind: queuedItem.kind,
+  });
   return { ok: true, queued: true } as const;
 };
 

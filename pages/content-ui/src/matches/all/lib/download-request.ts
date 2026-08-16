@@ -10,7 +10,9 @@ export const buildDownloadMessage = (
   type: MEDIA_MESSAGE.DOWNLOAD,
   payload: {
     url: variant?.url ?? item.url,
-    key: item.url,
+    // The selected URL can change when detection authority refreshes signed
+    // CDN URLs. The media item id is stable for the lifetime of the job.
+    key: item.id,
     kind: item.kind,
     fileName: item.fileName,
     title: item.title,

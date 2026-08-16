@@ -1,27 +1,9 @@
-import { COLORS } from './const.js';
-import type { ColorType, ValueOf } from './types.js';
+import type { ColorType } from './types.js';
+import { createLogger } from './runtime-logger.js';
 
 export const colorfulLog = (message: string, type: ColorType) => {
-  let color: ValueOf<typeof COLORS>;
-
-  switch (type) {
-    case 'success':
-      color = COLORS.FgGreen;
-      break;
-    case 'info':
-      color = COLORS.FgBlue;
-      break;
-    case 'error':
-      color = COLORS.FgRed;
-      break;
-    case 'warning':
-      color = COLORS.FgYellow;
-      break;
-    default:
-      color = COLORS[type];
-      break;
-  }
-
-  console.info(color, message);
-  console.info(COLORS['Reset']);
+  const log = createLogger('shared');
+  if (type === 'error') log.error(message);
+  else if (type === 'warning') log.warn(message);
+  else log.info(message, { color: type });
 };

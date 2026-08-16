@@ -29,7 +29,7 @@ test('preserves the selected adaptive variant when the content overlay starts a 
     type: 'media/download',
     payload: {
       url: 'https://media.example/video-720p60.webm',
-      key: 'https://media.example/progressive-720.mp4',
+      key: 'youtube',
       kind: 'video',
       fileName: undefined,
       title: 'Example',

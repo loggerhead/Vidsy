@@ -129,12 +129,22 @@ export type MediaSettings = {
   // Optional filename template. When empty, the downloader falls back to deriveFileName.
   // Supported tokens: {title} {resolution} {ext} {kind} {host} {date}
   filenameTemplate: string;
+  downloadConcurrency: number;
+  enableDownloadInterceptor: boolean;
+  downloadConnectionsPerFile: number;
+  autoCloseOnComplete: boolean;
+  hasSeenSaveAsHint: boolean;
 };
 
 export const DEFAULT_MEDIA_SETTINGS: MediaSettings = {
-  enableHlsMerging: false,
+  enableHlsMerging: true,
   maxHistory: 30,
   filenameTemplate: '',
+  downloadConcurrency: 1,
+  enableDownloadInterceptor: true,
+  downloadConnectionsPerFile: 8,
+  autoCloseOnComplete: false,
+  hasSeenSaveAsHint: false,
 };
 
 export const MEDIA_MESSAGE = {
@@ -161,7 +171,7 @@ export type MediaMessage =
       type: typeof MEDIA_MESSAGE.DOWNLOAD;
       payload: {
         url: string;
-        key?: string; // progress tracking key (defaults to url); use item.url when downloading a variant
+        key?: string; // stable progress/job key (normally MediaItem.id)
         kind?: MediaKind;
         fileName?: string;
         title?: string;
@@ -179,7 +189,7 @@ export type MediaMessage =
       };
     }
   | { type: typeof MEDIA_MESSAGE.CLEAR_TAB; payload?: { tabId?: number } }
-  | { type: typeof MEDIA_MESSAGE.CANCEL; payload: { url: string; intent?: 'pause' | 'cancel' } }
+  | { type: typeof MEDIA_MESSAGE.CANCEL; payload: { url?: string; key?: string; intent?: 'pause' | 'cancel' } }
   | { type: typeof MEDIA_MESSAGE.CLEAR_DOWNLOADS; payload?: { keys?: string[] } }
   | { type: typeof MEDIA_MESSAGE.MAIN_VIDEO_PRESENT; payload: { present: boolean } }
   | { type: typeof MEDIA_MESSAGE.PASTE_URL; payload: { url: string; tabId?: number } }

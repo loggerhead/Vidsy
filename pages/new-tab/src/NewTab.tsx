@@ -1,6 +1,7 @@
 import '@src/NewTab.css';
 import '@src/NewTab.scss';
 import { t } from '@extension/i18n';
+import { createLogger } from '@extension/shared';
 import { PROJECT_URL_OBJECT, useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
 import { exampleThemeStorage } from '@extension/storage';
 import { cn, ErrorDisplay, LoadingSpinner, ToggleButton } from '@extension/ui';
@@ -11,7 +12,7 @@ const NewTab = () => {
 
   const goGithubSite = () => chrome.tabs.create(PROJECT_URL_OBJECT);
 
-  console.log(t('hello', 'World'));
+  createLogger('new-tab').debug('rendered', { greeting: t('hello', 'World') });
   return (
     <div className={cn('App', isLight ? 'bg-slate-50' : 'bg-gray-800')}>
       <header className={cn('App-header', isLight ? 'text-gray-900' : 'text-gray-100')}>

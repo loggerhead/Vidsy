@@ -4,11 +4,13 @@
 // and mounts OPFS Files via WORKERFS at mux time.
 
 import { createLibAV, registerJsfetch, registerOutputDevice } from './libav';
+import { createLogger } from '@extension/shared';
 import { opfs } from './opfs';
 import { assertNonEmptyOutput, assertSuccessfulMux } from './output-validation';
 import { assertCompleteResponse, assertSuccessfulResponse, expectedResponseBytes } from './response-validation';
 import { decryptSegment } from '../lib/hls-crypto';
 import { headersForFetch } from '../lib/hls-request';
+import { errorInfo, flowLog, safeUrl } from '../lib/download-log';
 import { buildMediaProcessingArgs } from '../lib/media-processing';
 import type {
   FetchRangesRequest,
@@ -56,6 +58,14 @@ const fetchWithRetry = async (
       const timeoutSignal = AbortSignal.timeout(SEGMENT_TIMEOUT_MS);
       const combined = AbortSignal.any([signal, timeoutSignal]);
       const res = await fetch(url, { signal: combined, credentials: 'include', headers: extraHeaders });
+      flowLog('worker.fetch.response', {
+        url: safeUrl(url),
+        attempt: attempt + 1,
+        status: res.status,
+        contentType: res.headers.get('content-type') ?? '',
+        contentLength: res.headers.get('content-length') ?? undefined,
+        contentRange: res.headers.get('content-range') ?? undefined,
+      });
       assertSuccessfulResponse(res);
       // Fast path: no per-byte progress wanted — let fetch buffer the body
       // (slightly more efficient than streaming + concatenating manually).
@@ -88,6 +98,7 @@ const fetchWithRetry = async (
       }
       return out.buffer;
     } catch (err) {
+      flowLog('worker.fetch.retry', { url: safeUrl(url), attempt: attempt + 1, error: errorInfo(err) });
       if (signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
       if (attempt === retries - 1) throw err;
       await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
@@ -317,9 +328,16 @@ const handleFetchSegments = async (req: FetchSegmentsRequest): Promise<void> => 
 const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
   const controller = new AbortController();
   registerAbort(req.jobKey, controller);
-  const { jobId, jobKey, opfsName, url, ranges, stage, totalBytes: knownTotal } = req;
+  const { jobId, jobKey, opfsName, url, ranges, stage, totalBytes: knownTotal, keyHeaders } = req;
 
   try {
+    flowLog('worker.ranges.start', {
+      url: safeUrl(url),
+      jobKey: safeUrl(jobKey),
+      rangeCount: ranges.length,
+      totalBytes: knownTotal,
+      headerNames: Object.keys(keyHeaders ?? {}),
+    });
     await opfs.open(opfsName);
 
     // If the offscreen-doc GC purged the OPFS file between runs (or this is a
@@ -331,7 +349,13 @@ const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
 
     const fetchOne = (i: number, signal: AbortSignal, onBytes?: (downloaded: number) => void): Promise<ArrayBuffer> => {
       const { start, end } = ranges[i];
-      return fetchWithRetry(url, signal, { Range: `bytes=${start}-${end}` }, MAX_RETRIES, onBytes);
+      return fetchWithRetry(
+        url,
+        signal,
+        { ...headersForFetch(keyHeaders), Range: `bytes=${start}-${end}` },
+        MAX_RETRIES,
+        onBytes,
+      );
     };
 
     await parallelFetchToOpfs({
@@ -352,7 +376,9 @@ const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
     assertNonEmptyOutput(totalBytes);
     await opfs.close(opfsName);
     post({ type: 'fetch-done', jobId, opfsName, totalBytes });
+    flowLog('worker.ranges.done', { url: safeUrl(url), totalBytes });
   } catch (err) {
+    flowLog('worker.ranges.failed', { url: safeUrl(url), error: errorInfo(err) });
     const isAbort = err instanceof DOMException && err.name === 'AbortError';
     // Pause = abort. Keep the OPFS file so the next start can resume from
     // the chunks already on disk. Real failure = remove the partial file
@@ -373,6 +399,7 @@ const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
 const PROGRESS_POLL_MS = 250;
 
 const handleMux = async (req: MuxRequest): Promise<void> => {
+  const log = createLogger('mux');
   const { jobId, jobKey, outputOpfsName, plan, input, stage, durationSeconds, estimatedBytes } = req;
   const ffmpegArgs = buildMediaProcessingArgs(plan, input, outputOpfsName);
   const controller = new AbortController();
@@ -392,17 +419,17 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
   controller.signal.addEventListener('abort', onAbort);
 
   try {
-    console.log('[mux] starting', {
+    log.debug('starting', {
       planType: plan.type,
       inputCount: input.urls.length,
       inputFormat: input.formatHint ?? 'auto',
       outputContainer: plan.output.container,
     });
     libav = await createLibAV();
-    console.log(`[mux] libav instance created`);
+    log.debug('libav.created');
     await registerOutputDevice(libav, outputOpfsName);
     await registerJsfetch(libav, {});
-    console.log(`[mux] registration complete; invoking ffmpeg()`);
+    log.debug('ffmpeg.invoking');
 
     // Emit one mux-stage event immediately so the UI flips off the stale
     // download-audio 100% and into the indeterminate "Processing…" state. The
@@ -468,7 +495,7 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
             muxPercent,
           });
         } catch (pollErr) {
-          console.warn('[mux] poll error (non-fatal)', {
+          log.warn('poll_failed', {
             errorName: pollErr instanceof Error ? pollErr.name : 'UnknownError',
           });
         }
@@ -476,7 +503,7 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
     }, PROGRESS_POLL_MS);
 
     const rc = await libav.ffmpeg(...ffmpegArgs);
-    console.log(`[mux] ffmpeg() returned rc=${rc}`);
+    log.debug('ffmpeg.returned', { rc });
     assertSuccessfulMux(rc);
 
     // ffmpeg() returned — tear down poll, close OPFS, report size.
@@ -486,10 +513,10 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
     const totalBytes = opfs.size(outputOpfsName);
     assertNonEmptyOutput(totalBytes);
     await opfs.close(outputOpfsName);
-    console.log('[mux] done', { totalBytes });
+    log.debug('completed', { totalBytes });
     post({ type: 'mux-done', jobId, outputOpfsName, totalBytes });
   } catch (err) {
-    console.error('[mux] failed', { errorName: err instanceof Error ? err.name : 'UnknownError' });
+    log.error('failed', { error: err });
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = null;
     try {
@@ -513,11 +540,20 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
 const handleFetchUrl = async (req: FetchUrlRequest): Promise<void> => {
   const controller = new AbortController();
   registerAbort(req.jobKey, controller);
-  const { jobId, jobKey, opfsName, url, stage } = req;
+  const { jobId, jobKey, opfsName, url, stage, keyHeaders } = req;
 
   try {
+    flowLog('worker.stream.start', {
+      url: safeUrl(url),
+      jobKey: safeUrl(jobKey),
+      headerNames: Object.keys(keyHeaders ?? {}),
+    });
     await opfs.open(opfsName);
-    const res = await fetch(url, { signal: controller.signal, credentials: 'include' });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      credentials: 'include',
+      headers: headersForFetch(keyHeaders),
+    });
     assertSuccessfulResponse(res);
     if (!res.body) throw new Error('No response body');
 
@@ -538,7 +574,9 @@ const handleFetchUrl = async (req: FetchUrlRequest): Promise<void> => {
     assertNonEmptyOutput(downloaded);
     await opfs.close(opfsName);
     post({ type: 'fetch-done', jobId, opfsName, totalBytes: downloaded });
+    flowLog('worker.stream.done', { url: safeUrl(url), totalBytes: downloaded });
   } catch (err) {
+    flowLog('worker.stream.failed', { url: safeUrl(url), error: errorInfo(err) });
     try {
       await opfs.remove(opfsName);
     } catch {

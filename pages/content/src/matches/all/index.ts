@@ -1,9 +1,12 @@
 import { initMediaDetector } from './media-detector';
+import { createLogger } from '@extension/shared';
 import { initDeclaredMediaPresentationDetector } from './media-presentations';
 import { initPicker } from './picker';
 
-console.log('[CEB] All content script loaded');
+export const startAllContentScript = (): void => {
+  createLogger('content-all').info('started');
 
-initMediaDetector();
-initDeclaredMediaPresentationDetector();
-initPicker();
+  initMediaDetector();
+  initDeclaredMediaPresentationDetector();
+  initPicker();
+};

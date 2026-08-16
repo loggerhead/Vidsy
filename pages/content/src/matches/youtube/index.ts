@@ -1,9 +1,10 @@
-import { extractYouTubeMedia } from './player-formats';
-import { MEDIA_MESSAGE } from '@extension/shared';
+import { extractYouTubeMedia, hasDirectAdaptiveVideo } from './player-formats';
+import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
 import { createBridge, onFromMain, sendToMain } from '@src/lib/broadcast-bridge';
 import type { MediaVariant, SubtitleTrack } from '@extension/shared';
 
 const sentUrls = new Set<string>();
+const log = createLogger('youtube');
 const attemptedInnertubeVideoIds = new Set<string>();
 
 const ANDROID_VR_CLIENT_NAME = 'ANDROID_VR';
@@ -109,6 +110,14 @@ const sendCandidate = (candidate: {
 }) => {
   if (!candidate.url || sentUrls.has(candidate.url)) return false;
   sentUrls.add(candidate.url);
+  log.debug('candidate', {
+    kind: candidate.kind,
+    mimeType: candidate.mimeType,
+    resolution: candidate.resolution,
+    contentLength: candidate.contentLength,
+    hasAudio: Boolean(candidate.audioUrl),
+    variantCount: candidate.variants?.length ?? 0,
+  });
   chrome.runtime
     .sendMessage({
       type: MEDIA_MESSAGE.DETECTED,
@@ -126,13 +135,27 @@ const sendCandidate = (candidate: {
         variants: candidate.variants,
       },
     })
-    .catch(() => undefined);
+    .then(response => log.debug('candidate.sent', { response }))
+    .catch(error => log.warn('candidate.send_failed', { error }));
   return true;
 };
 
 const extractFormats = (pr: PlayerResponse) => {
   const { streamingData, videoDetails } = pr;
-  if (!streamingData) return 0;
+  if (!streamingData) {
+    log.warn('player.no_streaming_data');
+    return 0;
+  }
+
+  const allFormats = [...(streamingData.formats ?? []), ...(streamingData.adaptiveFormats ?? [])];
+  log.debug('player.formats', {
+    progressiveCount: streamingData.formats?.length ?? 0,
+    adaptiveCount: streamingData.adaptiveFormats?.length ?? 0,
+    directVideoCount: allFormats.filter(format => !!format.url && format.mimeType?.startsWith('video/')).length,
+    encryptedVideoCount: allFormats.filter(format => !!format.signatureCipher && format.mimeType?.startsWith('video/'))
+      .length,
+    directAdaptiveVideo: hasDirectAdaptiveVideo(pr),
+  });
 
   const rawTitle = videoDetails?.title ?? document.title;
   const title = rawTitle.replace(/\s*-\s*YouTube$/, '');
@@ -154,6 +177,15 @@ const extractFormats = (pr: PlayerResponse) => {
   const primary = media?.primary;
 
   if (primary?.url && media) {
+    log.debug('player.variants', {
+      variants: media.variants.map(variant => ({
+        resolution: variant.resolution,
+        name: variant.name,
+        frameRate: variant.frameRate,
+        mimeType: variant.mimeType,
+        hasAudio: Boolean(variant.audioUrl),
+      })),
+    });
     const primaryVariant = media.variants.find(variant => variant.url === primary.url);
     if (
       sendCandidate({
@@ -236,11 +268,18 @@ const tryAndroidVrFallback = async () => {
   const videoId = getVideoId();
   if (!videoId || attemptedInnertubeVideoIds.has(videoId)) return;
   attemptedInnertubeVideoIds.add(videoId);
+  log.debug('android_vr.start', { videoId });
 
   try {
     const pr = await fetchAndroidVrPlayerResponse(videoId);
-    if (pr?.streamingData) extractFormats(pr);
-  } catch {
+    if (pr?.streamingData) {
+      log.debug('android_vr.response', { hasStreamingData: true });
+      extractFormats(pr);
+    } else {
+      log.warn('android_vr.no_media');
+    }
+  } catch (error) {
+    log.warn('android_vr.failed', { error });
     // The page-level WEB response is still handled above; this fallback is best-effort.
   }
 };
@@ -265,53 +304,55 @@ const extractFromScriptTag = (): number | undefined => {
   return undefined;
 };
 
-let mainWorldRelayReceived = false;
-const bridge = createBridge(window.location.href);
+export const startYouTubeContentScript = (): void => {
+  let mainWorldRelayReceived = false;
+  const bridge = createBridge(window.location.href);
 
-onFromMain(bridge, msg => {
-  if (msg.name === 'youtube_player_response') {
-    const pr = (msg.data as { playerResponse?: PlayerResponse })?.playerResponse;
-    if (pr?.streamingData) {
-      mainWorldRelayReceived = true;
-      const sentCount = extractFormats(pr);
-      if (sentCount === 0) void tryAndroidVrFallback();
+  onFromMain(bridge, msg => {
+    if (msg.name === 'youtube_player_response') {
+      const pr = (msg.data as { playerResponse?: PlayerResponse })?.playerResponse;
+      if (pr?.streamingData) {
+        mainWorldRelayReceived = true;
+        const sentCount = extractFormats(pr);
+        if (sentCount === 0 || !hasDirectAdaptiveVideo(pr)) void tryAndroidVrFallback();
+      }
     }
-  }
-});
+  });
 
-const tryExtract = async () => {
+  const tryExtract = async () => {
+    sendToMain(bridge, { name: 'youtube_request_player_response', data: null });
+    setTimeout(() => {
+      if (!mainWorldRelayReceived) {
+        const sentCount = extractFromScriptTag();
+        if (!sentCount) void tryAndroidVrFallback();
+      }
+      if (mainWorldRelayReceived && sentUrls.size === 0) void tryAndroidVrFallback();
+    }, 300);
+  };
+
   sendToMain(bridge, { name: 'youtube_request_player_response', data: null });
-  setTimeout(() => {
-    if (!mainWorldRelayReceived) {
-      const sentCount = extractFromScriptTag();
-      if (!sentCount) void tryAndroidVrFallback();
-    }
-    if (mainWorldRelayReceived && sentUrls.size === 0) void tryAndroidVrFallback();
-  }, 300);
-};
 
-sendToMain(bridge, { name: 'youtube_request_player_response', data: null });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(tryExtract, 800));
+  } else {
+    setTimeout(tryExtract, 800);
+  }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => setTimeout(tryExtract, 800));
-} else {
-  setTimeout(tryExtract, 800);
-}
-
-document.addEventListener('yt-navigate-finish', () => {
-  sentUrls.clear();
-  attemptedInnertubeVideoIds.clear();
-  mainWorldRelayReceived = false;
-  setTimeout(() => void tryExtract(), 1200);
-});
-
-let lastUrl = location.href;
-new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
+  document.addEventListener('yt-navigate-finish', () => {
     sentUrls.clear();
     attemptedInnertubeVideoIds.clear();
     mainWorldRelayReceived = false;
     setTimeout(() => void tryExtract(), 1200);
-  }
-}).observe(document.documentElement, { childList: true, subtree: true });
+  });
+
+  let lastUrl = location.href;
+  new MutationObserver(() => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      sentUrls.clear();
+      attemptedInnertubeVideoIds.clear();
+      mainWorldRelayReceived = false;
+      setTimeout(() => void tryExtract(), 1200);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+};

@@ -32,12 +32,6 @@ const updateCache = async <D>(valueOrUpdate: ValueOrUpdateType<D>, cache: D | nu
 };
 
 /**
- * If one session storage needs access from content scripts, we need to enable it globally.
- * @default false
- */
-let globalSessionAccessLevelFlag: StorageConfigType['sessionAccessForContentScripts'] = false;
-
-/**
  * Checks if the storage permission is granted in the manifest.json.
  */
 const checkStoragePermission = (storageEnum: StorageEnum): void => {
@@ -67,25 +61,6 @@ export const createStorage = <D = string>(
 
   const serialize = config?.serialization?.serialize ?? ((v: D) => v);
   const deserialize = config?.serialization?.deserialize ?? (v => v as D);
-
-  // Set global session storage access level for StoryType.Session, only when not already done but needed.
-  if (
-    globalSessionAccessLevelFlag === false &&
-    storageEnum === StorageEnum.Session &&
-    config?.sessionAccessForContentScripts === true
-  ) {
-    checkStoragePermission(storageEnum);
-
-    chrome?.storage[storageEnum]
-      .setAccessLevel({
-        accessLevel: SessionAccessLevelEnum.ExtensionPagesAndContentScripts,
-      })
-      .catch(error => {
-        console.error(error);
-        console.error('Please call .setAccessLevel() into different context, like a background script.');
-      });
-    globalSessionAccessLevelFlag = true;
-  }
 
   // Register life cycle methods
   const get = async (): Promise<D> => {
@@ -154,4 +129,13 @@ export const createStorage = <D = string>(
     getSnapshot,
     subscribe,
   };
+};
+
+/** Configure session storage access from the extension background context. */
+export const configureSessionAccessLevel = async (
+  storageArea: Pick<chrome.storage.StorageArea, 'setAccessLevel'> = chrome?.storage.session,
+): Promise<void> => {
+  await storageArea.setAccessLevel({
+    accessLevel: SessionAccessLevelEnum.ExtensionPagesAndContentScripts,
+  });
 };

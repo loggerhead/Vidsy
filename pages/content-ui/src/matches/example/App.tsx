@@ -1,10 +1,11 @@
 import { t } from '@extension/i18n';
+import { createLogger } from '@extension/shared';
 import { ToggleButton } from '@extension/ui';
 import { useEffect } from 'react';
 
 export default function App() {
   useEffect(() => {
-    console.log('[CEB] Content ui example loaded');
+    createLogger('content-ui-example').info('started');
   }, []);
 
   return (

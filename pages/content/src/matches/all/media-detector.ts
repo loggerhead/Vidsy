@@ -1,7 +1,18 @@
-import { MEDIA_MESSAGE, stripTitleSuffix } from '@extension/shared';
+import { createLogger, MEDIA_MESSAGE, stripTitleSuffix } from '@extension/shared';
 import type { MediaKind } from '@extension/shared';
 
 const sentUrls = new Set<string>();
+
+const contentUrl = (value: string): string => {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '[invalid-url]';
+  }
+};
+
+const contentLog = createLogger('content-detector').debug;
 
 // Presence of a rendered main-video element. Gates background network
 // detections so listing pages (Instagram grid, feeds) don't flood the UI
@@ -11,6 +22,7 @@ let lastMainVideoPresent: boolean | null = null;
 const publishMainVideoPresence = (present: boolean) => {
   if (present === lastMainVideoPresent) return;
   lastMainVideoPresent = present;
+  contentLog('main_video_presence', { present, url: location.href });
   chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.MAIN_VIDEO_PRESENT, payload: { present } }).catch(() => undefined);
 };
 
@@ -224,6 +236,7 @@ const probedUrls = new Set<string>();
 const probeUrlForResolution = (url: string) => {
   if (probedUrls.has(url) || !url.startsWith('http')) return;
   probedUrls.add(url);
+  contentLog('resolution_probe.start', { url: contentUrl(url) });
   const probe = document.createElement('video');
   probe.preload = 'metadata';
   probe.muted = true;
@@ -247,6 +260,11 @@ const probeUrlForResolution = (url: string) => {
     'loadedmetadata',
     () => {
       if (probe.videoWidth > 0 && probe.videoHeight > 0) {
+        contentLog('resolution_probe.loadedmetadata', {
+          url: contentUrl(url),
+          resolution: { width: probe.videoWidth, height: probe.videoHeight },
+          duration: probe.duration,
+        });
         chrome.runtime
           .sendMessage({
             type: MEDIA_MESSAGE.DETECTED,
@@ -263,20 +281,36 @@ const probeUrlForResolution = (url: string) => {
     },
     { once: true },
   );
-  probe.addEventListener('error', cleanup, { once: true });
-  setTimeout(cleanup, PROBE_TIMEOUT_MS);
+  probe.addEventListener(
+    'error',
+    () => {
+      contentLog('resolution_probe.error', { url: contentUrl(url) });
+      cleanup();
+    },
+    { once: true },
+  );
+  setTimeout(() => {
+    if (!done) contentLog('resolution_probe.timeout', { url: contentUrl(url), timeoutMs: PROBE_TIMEOUT_MS });
+    cleanup();
+  }, PROBE_TIMEOUT_MS);
   probe.src = url;
   document.body.appendChild(probe);
 };
 
 // ─── Candidate sending ───
 const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: MediaKind }, el?: HTMLMediaElement) => {
-  if (!candidate.url || !isLikelyMediaUrl(candidate.url)) return;
+  if (!candidate.url || !isLikelyMediaUrl(candidate.url)) {
+    contentLog('candidate.drop.invalid_or_non_media', { url: candidate.url ? contentUrl(candidate.url) : '[empty]' });
+    return;
+  }
 
   const isVideo = el instanceof HTMLVideoElement;
 
   // Main-video filter: skip tiny hover previews
-  if (isVideo && !isMainVideo(el as HTMLVideoElement)) return;
+  if (isVideo && !isMainVideo(el as HTMLVideoElement)) {
+    contentLog('candidate.drop.non_main_video', { url: contentUrl(candidate.url) });
+    return;
+  }
 
   const duration = el && isFinite(el.duration) && el.duration > 0 ? el.duration : (getPageDuration() ?? undefined);
   const poster = isVideo && (el as HTMLVideoElement).poster ? (el as HTMLVideoElement).poster : undefined;
@@ -304,6 +338,16 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
     resolution,
   };
 
+  contentLog('candidate.detected', {
+    url: contentUrl(candidate.url),
+    kind: payload.kind,
+    mimeType: payload.mimeType,
+    isRendered,
+    resolution: payload.resolution,
+    duration: payload.duration,
+    alreadySent: sentUrls.has(candidate.url),
+  });
+
   // If already sent, only resend if we now have richer data
   if (sentUrls.has(candidate.url)) {
     if (thumbnail || duration || resolution) {
@@ -313,7 +357,10 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
   }
 
   sentUrls.add(candidate.url);
-  chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.DETECTED, payload }).catch(() => undefined);
+  chrome.runtime
+    .sendMessage({ type: MEDIA_MESSAGE.DETECTED, payload })
+    .then(response => contentLog('candidate.message_response', { url: contentUrl(candidate.url), response }))
+    .catch(error => contentLog('candidate.message_error', { url: contentUrl(candidate.url), error: String(error) }));
 
   // Kick off a metadata probe for non-rendered HTTP video URLs so their
   // resolution lands on a follow-up detection.

@@ -1,4 +1,4 @@
-// Typed RPC client around the download worker (dist/download_worker/main.js).
+// Typed RPC client around WXT's unlisted download worker (`download-worker.js`).
 // The worker owns OPFS. This module is the only place that speaks the worker protocol.
 
 import { updateProgress } from './progress';
@@ -27,7 +27,7 @@ let jobCounter = 0;
 
 const getWorker = (): Worker => {
   if (!worker) {
-    worker = new Worker(chrome.runtime.getURL('download_worker/main.js'), { type: 'module' });
+    worker = new Worker(chrome.runtime.getURL('download-worker.js'), { type: 'module' });
   }
   return worker;
 };
@@ -221,6 +221,7 @@ const fetchRangesToOpfs = (args: {
   jobKey: string;
   opfsName: string;
   url: string;
+  keyHeaders?: Record<string, string>;
   ranges: { start: number; end: number }[];
   totalBytes: number;
   stage: 'download-video' | 'download-audio';
@@ -245,6 +246,7 @@ const fetchRangesToOpfs = (args: {
           jobKey: args.jobKey,
           opfsName: args.opfsName,
           url: args.url,
+          keyHeaders: args.keyHeaders,
           ranges: args.ranges,
           totalBytes: args.totalBytes,
           stage: args.stage,
@@ -260,6 +262,7 @@ const fetchUrlToOpfs = (args: {
   jobKey: string;
   opfsName: string;
   url: string;
+  keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
   onProgress?: (progress: ProgressUpdate) => void;
   reportProgress?: boolean;
@@ -278,6 +281,7 @@ const fetchUrlToOpfs = (args: {
       jobKey: args.jobKey,
       opfsName: args.opfsName,
       url: args.url,
+      keyHeaders: args.keyHeaders,
       stage: args.stage,
     };
     send(req);
@@ -308,6 +312,39 @@ const removeOpfs = (opfsName: string): Promise<void> =>
 const cancelWorkerJob = (jobKey: string): void => {
   send({ type: 'cancel', jobKey });
 };
+
+// A small runtime probe used by the production-extension smoke check. It
+// verifies that the URL emitted by WXT creates a module worker and that the
+// worker's message channel is usable before a download needs it.
+const pingDownloadWorker = (timeoutMs = 5_000): Promise<void> =>
+  new Promise((resolve, reject) => {
+    ensureListener();
+    const activeWorker = getWorker();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      activeWorker.removeEventListener('message', onMessage);
+      activeWorker.removeEventListener('error', onError);
+    };
+    const onMessage = (event: MessageEvent<WorkerResponse>) => {
+      if (event.data.type !== 'pong') return;
+      cleanup();
+      resolve();
+    };
+    const onError = (event: ErrorEvent) => {
+      cleanup();
+      reject(new Error(event.message || 'Download worker failed during startup'));
+    };
+
+    activeWorker.addEventListener('message', onMessage);
+    activeWorker.addEventListener('error', onError, { once: true });
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Download worker did not respond within ${timeoutMs}ms`));
+    }, timeoutMs);
+    activeWorker.postMessage({ type: 'ping' });
+  });
 
 const muxInWorker = (args: {
   jobKey: string;
@@ -342,6 +379,7 @@ export {
   writeBytesToOpfs,
   removeOpfs,
   cancelWorkerJob,
+  pingDownloadWorker,
   muxInWorker,
   readMaxConnections,
 };
