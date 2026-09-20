@@ -1,5 +1,10 @@
-import { cancelDownloadsForTab as cancelQueuedDownloadsForTab, cancelQueued, enqueueDownload, setQueueRunner } from './download-queue';
 import { browserDownloadTerminal } from './browser-download-state';
+import {
+  cancelDownloadsForTab as cancelQueuedDownloadsForTab,
+  cancelQueued,
+  enqueueDownload,
+  setQueueRunner,
+} from './download-queue';
 import { findCapturedHeaders, injectHeadersForDownload, removeHeadersForDownload } from './header-capture';
 import { addHistoryEntry } from './history';
 import { dlLog } from './logger';
@@ -218,12 +223,13 @@ const downloadHlsMuxed = async (
   output: 'mp4' | 'mp3',
   key: string,
   headers?: Record<string, string>,
+  audioUrl?: string,
 ) => {
   dlLog('downloadHlsMuxed: start', { playlistUrl, output, key, headers });
   await ensureOffscreen();
   const res = await sendMessageWithRetry({
     type: 'offscreen/download-blob',
-    payload: { kind: 'hls', url: playlistUrl, fileName, output, key, headers },
+    payload: { kind: 'hls', url: playlistUrl, fileName, output, key, headers, audioUrl },
   });
   if (chrome.runtime.lastError) throw chrome.runtime.lastError;
   if (!res?.ok) throw new Error(res?.error || 'Download failed in offscreen');
@@ -405,7 +411,7 @@ const runDownloadJob = async (payload: DownloadPayload) => {
     });
 
     const downloadId = shouldMergeHls
-      ? await downloadHlsMuxed(payload.url, fileName, outputFormat, key, captured)
+      ? await downloadHlsMuxed(payload.url, fileName, outputFormat, key, captured, payload.audioUrl)
       : shouldMergeDash
         ? await downloadDashMuxed(payload.url, fileName, outputFormat, key, captured)
         : shouldMergeAV

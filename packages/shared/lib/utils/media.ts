@@ -45,6 +45,8 @@ export type MediaItem = {
   fileName?: string;
   contentLength?: number;
   variants?: MediaVariant[];
+  // Exact child playlist URLs declared by an HLS master.
+  hlsChildUrls?: string[];
   // Native resolution of the rendered <video> element (or top-level stream
   // when known). Drives the "1080p" badge on rows without per-variant data.
   resolution?: { width: number; height: number };

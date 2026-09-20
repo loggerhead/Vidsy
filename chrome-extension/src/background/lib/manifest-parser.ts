@@ -1,10 +1,12 @@
 import { parseM3u8Attributes } from './media-utils';
+import { parseHlsMaster } from '../../offscreen/lib/m3u8-parser';
 import { createLogger } from '@extension/shared';
 import type { MediaVariant } from '@extension/shared';
 
 type ManifestParseResult = {
   variants: MediaVariant[];
   isDrmProtected: boolean;
+  childUrls?: string[];
 };
 
 const manifestUrlForLog = (value: string): string => {
@@ -28,7 +30,7 @@ const isHlsKeyLineDrm = (attrsRaw: string): boolean => {
   return method !== 'NONE' && method !== '' && method !== 'AES-128';
 };
 
-export const parseHlsVariants = async (manifestUrl: string): Promise<ManifestParseResult> => {
+const parseHlsVariants = async (manifestUrl: string): Promise<ManifestParseResult> => {
   try {
     manifestLog('hls.fetch.start', { url: manifestUrlForLog(manifestUrl) });
     const res = await fetch(manifestUrl);
@@ -38,40 +40,13 @@ export const parseHlsVariants = async (manifestUrl: string): Promise<ManifestPar
     }
     const text = await res.text();
     const lines = text.split('\n');
-    const variants: MediaVariant[] = [];
-    let isDrmProtected = false;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-
-      if (line.startsWith('#EXT-X-KEY') || line.startsWith('#EXT-X-SESSION-KEY')) {
-        if (isHlsKeyLineDrm(line.slice(line.indexOf(':') + 1))) isDrmProtected = true;
-        continue;
-      }
-
-      if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
-      const attrsRaw = line.slice(line.indexOf(':') + 1);
-      const attrs = parseM3u8Attributes(attrsRaw);
-
-      const nextLine = lines[i + 1]?.trim();
-      if (!nextLine || nextLine.startsWith('#')) continue;
-      const variantUrl = new URL(nextLine, manifestUrl).toString();
-      const resolutionText = attrs['RESOLUTION'] ?? '';
-      const [wStr, hStr] = resolutionText.split('x');
-      const width = Number(wStr);
-      const height = Number(hStr);
-      const bandwidth = attrs['BANDWIDTH'] ? Number(attrs['BANDWIDTH']) : undefined;
-      const name = attrs['NAME'] ?? undefined;
-      const codecs = attrs['CODECS'] ?? undefined;
-
-      variants.push({
-        url: variantUrl,
-        bandwidth: Number.isFinite(bandwidth) ? bandwidth : undefined,
-        resolution: Number.isFinite(width) && Number.isFinite(height) ? { width, height } : undefined,
-        name,
-        codecs,
-      });
-    }
+    const { variants: parsedVariants, childUrls } = parseHlsMaster(text, res.url || manifestUrl);
+    const variants: MediaVariant[] = parsedVariants;
+    const isDrmProtected = lines.some(
+      line =>
+        (line.startsWith('#EXT-X-KEY:') || line.startsWith('#EXT-X-SESSION-KEY:')) &&
+        isHlsKeyLineDrm(line.slice(line.indexOf(':') + 1)),
+    );
 
     if (isDrmProtected) {
       for (const v of variants) v.isDrmProtected = true;
@@ -83,7 +58,7 @@ export const parseHlsVariants = async (manifestUrl: string): Promise<ManifestPar
       variants: variants.map(v => ({ resolution: v.resolution, bandwidth: v.bandwidth, url: v.url })),
       isDrmProtected,
     });
-    return { variants, isDrmProtected };
+    return { variants, isDrmProtected, childUrls };
   } catch (error) {
     manifestLog('hls.failed', { url: manifestUrlForLog(manifestUrl), error: String(error) });
     return { variants: [], isDrmProtected: false };
@@ -158,3 +133,5 @@ export const parseDashVariants = async (
 };
 
 export type { ManifestParseResult };
+
+export { parseHlsVariants };

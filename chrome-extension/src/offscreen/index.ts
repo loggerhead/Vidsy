@@ -27,75 +27,75 @@ export const startOffscreen = (): void => {
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  log.debug('message.received', {
-    type: message.type,
-    key: message.payload?.key,
-    url: message.payload?.url,
-    kind: message.payload?.kind,
-  });
-  if (message.type === 'offscreen/cleanup-blob') {
-    void cleanupBlob(message.payload.blobUrl).finally(() => sendResponse({ ok: true }));
-    return true;
-  }
-
-  if (message.type === 'offscreen/cancel') {
-    const { key } = message.payload;
-    const controller = activeAbortControllers.get(key);
-    if (controller) {
-      controller.abort();
-      activeAbortControllers.delete(key);
-    }
-    log.debug('cancel', { key, hadController: Boolean(controller) });
-    sendResponse({ ok: true });
-    return;
-  }
-
-  // Readiness probe for the production-package smoke test. This exercises
-  // the real WXT-emitted worker URL without introducing a second download
-  // implementation or exposing any product state.
-  if (message.type === 'offscreen/worker-ready') {
-    void pingDownloadWorker()
-      .then(() => sendResponse({ ok: true, workerUrl: chrome.runtime.getURL('download-worker.js') }))
-      .catch(error => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-    return true;
-  }
-
-  if (message.type === 'offscreen/download-blob') {
-    const { kind, url, fileName, output, key, headers, audioUrl, videoMimeType, audioMimeType } = message.payload;
-    const handle = (
-      p: ReturnType<
-        typeof downloadHlsMuxed | typeof downloadDashMuxed | typeof downloadMerged | typeof downloadHttpDirect
-      >,
-    ) =>
-      p
-        .then(result => {
-          log.debug('download.success', { key, kind, result });
-          sendResponse({ ok: true, ...result });
-        })
-        .catch(err => {
-          log.error('download.failed', { key, kind, error: err });
-          sendResponse({ ok: false, error: String(err) });
-        });
-
-    log.debug('download.started', {
-      key,
-      kind,
-      url,
-      audioUrl: audioUrl ? '[present]' : undefined,
-      fileName,
+    log.debug('message.received', {
+      type: message.type,
+      key: message.payload?.key,
+      url: message.payload?.url,
+      kind: message.payload?.kind,
     });
-
-    if (kind === 'hls') {
-      handle(downloadHlsMuxed(url, fileName, output, key, headers));
-    } else if (kind === 'dash') {
-      handle(downloadDashMuxed(url, fileName, output, key, headers));
-    } else if (kind === 'merged') {
-      handle(downloadMerged(url, audioUrl, videoMimeType, audioMimeType, key, headers));
-    } else if (kind === 'http') {
-      handle(downloadHttpDirect(url, key, output, headers));
+    if (message.type === 'offscreen/cleanup-blob') {
+      void cleanupBlob(message.payload.blobUrl).finally(() => sendResponse({ ok: true }));
+      return true;
     }
-    return true;
-  }
+
+    if (message.type === 'offscreen/cancel') {
+      const { key } = message.payload;
+      const controller = activeAbortControllers.get(key);
+      if (controller) {
+        controller.abort();
+        activeAbortControllers.delete(key);
+      }
+      log.debug('cancel', { key, hadController: Boolean(controller) });
+      sendResponse({ ok: true });
+      return;
+    }
+
+    // Readiness probe for the production-package smoke test. This exercises
+    // the real WXT-emitted worker URL without introducing a second download
+    // implementation or exposing any product state.
+    if (message.type === 'offscreen/worker-ready') {
+      void pingDownloadWorker()
+        .then(() => sendResponse({ ok: true, workerUrl: chrome.runtime.getURL('download-worker.js') }))
+        .catch(error => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.type === 'offscreen/download-blob') {
+      const { kind, url, fileName, output, key, headers, audioUrl, videoMimeType, audioMimeType } = message.payload;
+      const handle = (
+        p: ReturnType<
+          typeof downloadHlsMuxed | typeof downloadDashMuxed | typeof downloadMerged | typeof downloadHttpDirect
+        >,
+      ) =>
+        p
+          .then(result => {
+            log.debug('download.success', { key, kind, result });
+            sendResponse({ ok: true, ...result });
+          })
+          .catch(err => {
+            log.error('download.failed', { key, kind, error: err });
+            sendResponse({ ok: false, error: String(err) });
+          });
+
+      log.debug('download.started', {
+        key,
+        kind,
+        url,
+        audioUrl: audioUrl ? '[present]' : undefined,
+        fileName,
+      });
+
+      if (kind === 'hls') {
+        handle(downloadHlsMuxed(url, fileName, output, key, headers, audioUrl));
+      } else if (kind === 'dash') {
+        handle(downloadDashMuxed(url, fileName, output, key, headers));
+      } else if (kind === 'merged') {
+        handle(downloadMerged(url, audioUrl, videoMimeType, audioMimeType, key, headers));
+      } else if (kind === 'http') {
+        handle(downloadHttpDirect(url, key, output, headers));
+      }
+      return true;
+    }
     return false;
   });
 };

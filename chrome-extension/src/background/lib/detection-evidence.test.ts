@@ -62,3 +62,22 @@ test('an MSE observation cannot replace an existing structured variant authority
   assert.equal(result.consumed, true);
   assert.deepEqual(result.items, [authority]);
 });
+
+test('HLS children collapse into their master in either arrival order without swallowing another video', async () => {
+  const { reconcileHlsPlaylistEvidence } = await import('./detection-evidence');
+  const master = {
+    id: 'master',
+    url: 'https://cdn.example/master.m3u8',
+    kind: 'hls',
+    source: 'network',
+    detectedAt: 1,
+    hlsChildUrls: ['https://cdn.example/video.m3u8', 'https://audio.example/audio.m3u8'],
+  } as MediaItem;
+  const audio = { ...master, id: 'audio', url: master.hlsChildUrls![1], hlsChildUrls: undefined };
+  const video = { ...audio, id: 'video', url: master.hlsChildUrls![0] };
+  const unrelated = { ...audio, id: 'other', url: 'https://cdn.example/other.m3u8' };
+  assert.deepEqual(reconcileHlsPlaylistEvidence([audio, video, unrelated], master).items, [unrelated]);
+  assert.equal(reconcileHlsPlaylistEvidence([master, unrelated], audio).consumed, true);
+  assert.equal(reconcileHlsPlaylistEvidence([master, unrelated], video).consumed, true);
+  assert.equal(reconcileHlsPlaylistEvidence([master], unrelated).consumed, false);
+});

@@ -1,3 +1,5 @@
+import { parseHlsMaster } from './m3u8-parser';
+
 const BROWSER_CONTROLLED_HEADERS = new Set(['cookie', 'origin', 'referer']);
 
 const headersForFetch = (headers?: Record<string, string>): Record<string, string> =>
@@ -7,7 +9,7 @@ const headersForFetch = (headers?: Record<string, string>): Record<string, strin
     ),
   );
 
-type ResolvedPlaylist = { url: string; manifestText: string };
+type ResolvedPlaylist = { url: string; manifestText: string; audio?: ResolvedPlaylist };
 
 type HlsPlaylistFetchOptions = {
   fetchImpl?: typeof fetch;
@@ -40,23 +42,14 @@ const fetchResolvedHlsPlaylist = async (
   }
   if (!manifestText.includes('#EXT-X-STREAM-INF')) return { url: responseUrl, manifestText };
 
-  const lines = manifestText.split('\n').map(line => line.trim());
-  let bestBandwidth = -1;
-  let bestUrl = '';
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
-    const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
-    const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
-    let urlIndex = index + 1;
-    while (urlIndex < lines.length && (lines[urlIndex] === '' || lines[urlIndex].startsWith('#'))) urlIndex++;
-    if (urlIndex < lines.length && bandwidth > bestBandwidth) {
-      bestBandwidth = bandwidth;
-      bestUrl = new URL(lines[urlIndex], responseUrl).toString();
-    }
-  }
-  if (!bestUrl) throw new Error('No variant stream found in master playlist');
-  return fetchResolvedHlsPlaylist(bestUrl, headers, options);
+  const { variants } = parseHlsMaster(manifestText, responseUrl);
+  const best = variants.sort(
+    (a, b) => (b.resolution?.height ?? 0) - (a.resolution?.height ?? 0) || (b.bandwidth ?? 0) - (a.bandwidth ?? 0),
+  )[0];
+  if (!best) throw new Error('No variant stream found in master playlist');
+  const video = await fetchResolvedHlsPlaylist(best.url, headers, options);
+  const audio = best.audioUrl ? await fetchResolvedHlsPlaylist(best.audioUrl, headers, options) : undefined;
+  return { ...video, audio: audio ?? video.audio };
 };
 
 export { fetchResolvedHlsPlaylist, headersForFetch };

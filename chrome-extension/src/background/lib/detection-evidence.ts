@@ -52,3 +52,11 @@ const reconcilePlayerEvidence = (
 };
 
 export { isVariantAuthority, reconcilePlayerEvidence, sameMainPlayerSession };
+
+// A master owns only the exact child playlists it declares, including unused
+// language/bitrate renditions. Do not infer ownership from directories or tabs.
+export const reconcileHlsPlaylistEvidence = (items: MediaItem[], incoming: MediaItem) => {
+  if (items.some(item => item.hlsChildUrls?.includes(incoming.url))) return { items, consumed: true };
+  const children = new Set(incoming.hlsChildUrls);
+  return { items: items.filter(item => !children.has(item.url)), consumed: false };
+};

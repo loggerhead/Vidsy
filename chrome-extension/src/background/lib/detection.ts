@@ -1,6 +1,12 @@
-import { isVariantAuthority, reconcilePlayerEvidence, sameMainPlayerSession } from './detection-evidence';
+import {
+  isVariantAuthority,
+  reconcilePlayerEvidence,
+  sameMainPlayerSession,
+  reconcileHlsPlaylistEvidence,
+} from './detection-evidence';
 import { handleFmp4RangeDetection, clearFmp4RangeDetectionsForTab } from './fmp4-range-detector';
 import { findCapturedHeaders } from './header-capture';
+import { dlLog } from './logger';
 import { parseHlsVariants, parseDashVariants } from './manifest-parser';
 import {
   createId,
@@ -14,13 +20,12 @@ import {
   MIN_MEDIA_SIZE_BYTES,
 } from './media-utils';
 import { mediaDetectionsStorage } from '@extension/storage';
-import type { MediaItem, MediaVariant } from '@extension/shared';
-import { dlLog } from './logger';
 import type { TabWorkLifecycle } from './tab-work-lifecycle';
+import type { MediaItem, MediaVariant } from '@extension/shared';
 
 let tabWorkLifecycle: TabWorkLifecycle | undefined;
 
-export const configureDetectionTabLifecycle = (lifecycle: TabWorkLifecycle) => {
+const configureDetectionTabLifecycle = (lifecycle: TabWorkLifecycle) => {
   tabWorkLifecycle = lifecycle;
 };
 
@@ -389,6 +394,7 @@ const normalizeDetection = (candidate: Partial<MediaItem>, tabId?: number, pageU
     contentLength: candidate.contentLength,
     kind,
     variants: candidate.variants,
+    hlsChildUrls: candidate.hlsChildUrls,
     resolution: candidate.resolution,
     thumbnail: candidate.thumbnail,
     duration: candidate.duration,
@@ -445,6 +451,10 @@ export const upsertDetection = async (
     variantCount: normalizedCandidate.variants?.length ?? 0,
     variants: normalizedCandidate.variants?.map(v => ({ resolution: v.resolution, url: v.url })),
   });
+
+  const hlsReconciliation = reconcileHlsPlaylistEvidence(current, normalizedCandidate);
+  if (hlsReconciliation.consumed) return;
+  current = hlsReconciliation.items;
 
   // A provider extractor that supplies a complete variants list is the
   // authority for that page's player. Its signed CDN URLs change on refresh,
@@ -563,6 +573,7 @@ export const upsertDetection = async (
     if (candidate.resolution && !existing.resolution) patch.resolution = candidate.resolution;
     if (candidate.contentLength && !existing.contentLength) patch.contentLength = candidate.contentLength;
     if (candidate.variants?.length && !existing.variants?.length) patch.variants = candidate.variants;
+    if (candidate.hlsChildUrls?.length) patch.hlsChildUrls = candidate.hlsChildUrls;
     if (candidate.audioUrl && !existing.audioUrl) {
       patch.audioUrl = candidate.audioUrl;
       patch.audioMimeType = candidate.audioMimeType;
@@ -989,10 +1000,12 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
   }
 
   let variants: MediaVariant[] | undefined;
+  let hlsChildUrls: string[] | undefined;
   let isDrmProtected = false;
   if (kind === 'hls') {
     const parsed = await parseHlsVariants(url);
     variants = parsed.variants;
+    hlsChildUrls = parsed.childUrls;
     isDrmProtected = parsed.isDrmProtected;
     dlLog('detect.manifest.hls_parsed', {
       tabId,
@@ -1010,13 +1023,6 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
         const bBw = b.bandwidth ?? 0;
         return bBw - aBw;
       });
-    }
-
-    const dirSet = ensureSeenMasterDirCache(tabId);
-    const directory = dirKey(url);
-    if (directory) {
-      if (dirSet?.has(directory)) return; // Already caught a playlist from this directory (likely the same video)
-      dirSet?.add(directory);
     }
   }
 
@@ -1058,6 +1064,7 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
       source: 'network',
       kind,
       variants,
+      hlsChildUrls,
       isDrmProtected: isDrmProtected || undefined,
     },
     tabId,
@@ -1072,3 +1079,5 @@ export const setMainVideoPresent = (tabId: number, present: boolean) => {
 };
 
 export const hasMainVideo = (tabId: number) => tabsWithMainVideo.has(tabId);
+
+export { configureDetectionTabLifecycle };

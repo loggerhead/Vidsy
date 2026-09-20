@@ -100,3 +100,38 @@ export const parseHlsPlaylist = (manifestText: string, baseUrl: string): HlsPlay
 
   return { segments, mapUrl };
 };
+
+// Master playlists own the relationship between variants and renditions.
+export const parseHlsMaster = (text: string, baseUrl: string) => {
+  const lines = text.split('\n').map(line => line.trim());
+  const renditions = lines
+    .filter(line => line.startsWith('#EXT-X-MEDIA:'))
+    .map(line => parseM3u8Attributes(line.slice('#EXT-X-MEDIA:'.length)));
+  const variants = lines.flatMap((line, index) => {
+    if (!line.startsWith('#EXT-X-STREAM-INF:')) return [];
+    const attrs = parseM3u8Attributes(line.slice('#EXT-X-STREAM-INF:'.length));
+    const uri = lines.slice(index + 1).find(value => value && !value.startsWith('#'));
+    if (!uri) return [];
+    const audio = renditions.filter(item => item.TYPE === 'AUDIO' && item['GROUP-ID'] === attrs.AUDIO);
+    const selected =
+      audio.find(item => item.DEFAULT === 'YES') ?? audio.find(item => item.AUTOSELECT === 'YES') ?? audio[0];
+    const [width, height] = (attrs.RESOLUTION ?? '').split('x').map(Number);
+    return [
+      {
+        url: new URL(uri, baseUrl).href,
+        bandwidth: Number(attrs.BANDWIDTH) || undefined,
+        resolution: width > 0 && height > 0 ? { width, height } : undefined,
+        codecs: attrs.CODECS,
+        name: attrs.NAME,
+        audioUrl: selected?.URI ? new URL(selected.URI, baseUrl).href : undefined,
+      },
+    ];
+  });
+  const childUrls = [
+    ...new Set([
+      ...variants.map(variant => variant.url),
+      ...renditions.filter(item => item.URI).map(item => new URL(item.URI, baseUrl).href),
+    ]),
+  ];
+  return { variants, childUrls };
+};
