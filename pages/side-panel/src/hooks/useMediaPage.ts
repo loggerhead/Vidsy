@@ -1,5 +1,4 @@
 import { MEDIA_MESSAGE, useStorage, pickBestVariant } from '@extension/shared';
-import type { DownloadState } from '@extension/shared';
 import {
   mediaDetectionsStorage,
   mediaDownloadsStorage,
@@ -9,6 +8,7 @@ import {
 } from '@extension/storage';
 import { useEffect, useMemo, useState } from 'react';
 import type {
+  DownloadState,
   MediaDetectionState,
   MediaDownloadProgress,
   MediaHistoryItem,
@@ -59,7 +59,13 @@ export const useMediaPage = () => {
   }, [currentMedia]);
 
   useEffect(() => {
-    if (downloadState.busyUrl) return;
+    if (downloadState.busyUrl) {
+      const busyEntry =
+        downloads[downloadState.busyUrl] ??
+        Object.values(downloads).find(entry => entry.item?.id === downloadState.busyUrl);
+      if (busyEntry) setDownloadState({ busyUrl: null, error: null });
+      return;
+    }
     const ACTIVE = new Set(['init', 'fetch-manifest', 'download-video', 'download-audio', 'mux', 'finalize']);
     const entry = Object.entries(downloads).find(([, p]) => ACTIVE.has(p.stage));
     if (entry) setDownloadState({ busyUrl: entry[0], error: null });
@@ -101,7 +107,11 @@ export const useMediaPage = () => {
       },
     });
     if (!res?.ok) setDownloadState({ busyUrl: null, error: res?.error ?? 'Download failed' });
-    else setDownloadState({ busyUrl: null, error: null });
+    else {
+      // The enqueue response only means the job was accepted. Keep the local
+      // busy marker until storage publishes the first real progress snapshot.
+      setDownloadState({ busyUrl: item.id, error: null });
+    }
   };
 
   const onCancel = async (key: string) => {

@@ -53,18 +53,4 @@ export default defineConfig({
       },
     },
   },
-  hooks: {
-    'server:created': (_wxt, server) => {
-      /*
-       * WXT's default MV3 content-script reload updates the registration and
-       * reloads every tab that matches the script. Our content scripts match
-       * all sites, so that turns a one-file edit into a browser-wide refresh.
-       *
-       * Content bundles already carry the local HMR client from
-       * `@extension/hmr`; it refreshes only the visible tab (or a WebDriver
-       * test tab). Let that path own dev refreshes instead.
-       */
-      server.reloadContentScript = () => {};
-    },
-  },
 });

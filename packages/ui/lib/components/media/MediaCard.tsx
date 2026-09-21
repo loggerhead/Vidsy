@@ -91,8 +91,34 @@ export const MediaCard = ({
     'mux',
     'finalize',
   ]);
-  const progress = downloads[item.url];
-  const isBusy = downloadState.busyUrl === item.id || (progress != null && ACTIVE_STAGES.has(progress.stage));
+  // Download progress is keyed by the stable media item id. Keep the item
+  // snapshot fallback for entries created before a detection refresh replaced
+  // the current item's object.
+  const itemUrls = new Set(
+    [
+      item.url,
+      item.audioUrl,
+      ...(item.variants?.flatMap(variant => [variant.url, variant.audioUrl]) ?? []),
+      ...(item.hlsChildUrls ?? []),
+    ].filter((url): url is string => Boolean(url)),
+  );
+  const progress =
+    downloads[item.id] ??
+    Object.values(downloads).find(
+      entry =>
+        entry.item?.id === item.id ||
+        entry.item?.url === item.url ||
+        entry.key === item.id ||
+        itemUrls.has(entry.key) ||
+        (entry.item && (entry.item.url === item.url || itemUrls.has(entry.item.url))),
+    );
+  const locallyBusy = downloadState.busyUrl === item.id;
+  const isBusy = locallyBusy || (progress != null && ACTIVE_STAGES.has(progress.stage));
+  // The enqueue response can arrive before the first storage progress update.
+  // Render immediately instead of falling back to the Download button during
+  // that gap; the real entry replaces this placeholder on the next update.
+  const displayProgress =
+    progress ?? (locallyBusy ? { key: item.id, stage: 'init' as const, downloadedBytes: 0 } : undefined);
   const isComplete = progress?.stage === 'success' && progress.downloadId;
 
   const selectedVariantUrl = selectedVariants[item.id];
@@ -259,10 +285,10 @@ export const MediaCard = ({
                 <IconFolder /> Show in Folder
               </button>
             </div>
-          ) : isBusy && progress ? (
+          ) : isBusy && displayProgress ? (
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
-                <DownloadProgress progress={progress} isLight={isLight} />
+                <DownloadProgress progress={displayProgress} isLight={isLight} />
               </div>
               <button
                 className={cn(

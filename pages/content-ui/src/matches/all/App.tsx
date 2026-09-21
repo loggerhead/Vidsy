@@ -4,14 +4,16 @@ import { PillBar } from './components/PillBar';
 import { FONT } from './components/tokens';
 import { buildDownloadMessage } from './lib/download-request';
 import { ACTIVE_STAGES, pickBestVariant, buildRows } from './lib/media-helpers';
+import { resolvePlayerMedia, selectVisiblePlayer, visiblePlayerArea } from './lib/player-media';
 import { createLogger, MEDIA_MESSAGE, useStorage } from '@extension/shared';
 import { mediaDetectionsStorage, mediaDownloadsStorage, mediaSettingsStorage } from '@extension/storage';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { VideoEntry } from './lib/media-helpers';
 import type { MediaDownloadProgress, MediaItem, MediaVariant } from '@extension/shared';
 
+const log = createLogger('content-ui');
+
 const App = () => {
-  const log = createLogger('content-ui');
   const detections = useStorage(mediaDetectionsStorage);
   const rawDownloads = useStorage(mediaDownloadsStorage);
   const downloads = useMemo(() => (rawDownloads ?? {}) as Record<string, MediaDownloadProgress>, [rawDownloads]);
@@ -34,7 +36,7 @@ const App = () => {
   }, [detections, tabId]);
 
   /* video element tracking */
-  const [videos, setVideos] = useState<VideoEntry[]>([]);
+  const [videos, setVideos] = useState<Array<VideoEntry & { playing: boolean; sourceKey: string }>>([]);
   useEffect(() => {
     let n = 0;
     const ids = new WeakMap<HTMLVideoElement, string>();
@@ -47,11 +49,30 @@ const App = () => {
       if (rAF !== null) return;
       rAF = requestAnimationFrame(() => {
         rAF = null;
-        setVideos(
-          Array.from(document.querySelectorAll<HTMLVideoElement>('video'))
-            .filter(el => el.offsetWidth > 100 && el.offsetHeight > 60)
-            .map(el => ({ el, id: getId(el), rect: el.getBoundingClientRect() })),
-        );
+        const next = Array.from(document.querySelectorAll<HTMLVideoElement>('video'))
+          .filter(el => el.offsetWidth > 100 && el.offsetHeight > 60)
+          .map(el => ({
+            el,
+            id: getId(el),
+            rect: el.getBoundingClientRect(),
+            playing: !el.paused && !el.ended,
+            sourceKey: JSON.stringify([el.currentSrc, el.src, el.poster]),
+          }));
+        setVideos(previous => {
+          const unchanged =
+            previous.length === next.length &&
+            previous.every(
+              (entry, index) =>
+                entry.el === next[index].el &&
+                entry.sourceKey === next[index].sourceKey &&
+                entry.playing === next[index].playing,
+            );
+          const selected = (entries: typeof next) =>
+            selectVisiblePlayer(entries, window.innerWidth, window.innerHeight)?.el;
+          // Scrolling positions the existing overlay directly; React only
+          // needs a render when the selected player or its media changes.
+          return unchanged && selected(previous) === selected(next) ? previous : next;
+        });
       });
     };
     const mo = new MutationObserver(measure);
@@ -59,23 +80,31 @@ const App = () => {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['src', 'style', 'class'],
+      attributeFilter: ['src', 'poster', 'style', 'class'],
     });
     const ro = new ResizeObserver(measure);
     ro.observe(document.documentElement);
     window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, { capture: true, passive: true });
+    document.addEventListener('play', measure, true);
+    document.addEventListener('pause', measure, true);
+    document.addEventListener('loadedmetadata', measure, true);
     measure();
     const t = setInterval(measure, 800);
     return () => {
       mo.disconnect();
       ro.disconnect();
       window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+      document.removeEventListener('play', measure, true);
+      document.removeEventListener('pause', measure, true);
+      document.removeEventListener('loadedmetadata', measure, true);
+      if (rAF !== null) cancelAnimationFrame(rAF);
       clearInterval(t);
     };
   }, []);
 
   /* UI state */
-  const [dismissed, setDismissed] = useState(false);
   const [open, setOpen] = useState(false);
   const [busyUrl, setBusyUrl] = useState<string | null>(null);
   const [isHovered, setIsHovered] = useState(false);
@@ -89,7 +118,15 @@ const App = () => {
   const ref = useRef<HTMLDivElement>(null);
   const positionedVideoRef = useRef<HTMLVideoElement | null>(null);
   const requestPositionRef = useRef<() => void>(() => {});
+  const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevVideoRef = useRef<VideoEntry | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (hoverCloseTimerRef.current !== null) clearTimeout(hoverCloseTimerRef.current);
+    },
+    [],
+  );
 
   /* Keep the overlay attached to its player without putting scroll updates
      through React. This runs at most once per animation frame and only reads
@@ -103,13 +140,13 @@ const App = () => {
       if (!overlay || !video) return;
 
       const rect = video.getBoundingClientRect();
-      if (rect.top < 0 || rect.bottom <= 0 || rect.top >= window.innerHeight || rect.right <= 0) {
+      if (!video.isConnected || visiblePlayerArea(rect, window.innerWidth, window.innerHeight) === 0) {
         overlay.style.visibility = 'hidden';
         return;
       }
 
       const x = Math.min(rect.right + 1, window.innerWidth - overlay.offsetWidth - 1);
-      overlay.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(rect.top)}px, 0)`;
+      overlay.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(Math.max(0, rect.top))}px, 0)`;
       overlay.style.visibility = 'visible';
     };
     const requestPosition = () => {
@@ -130,7 +167,7 @@ const App = () => {
 
   useLayoutEffect(() => {
     requestPositionRef.current();
-  }, [videos, isHovered, open, busyUrl]);
+  }, [videos, tabItems, isHovered, open, busyUrl]);
 
   /* Download intercept: background cancels a media download and asks us to
      show a modal so the user can route it through Vidsy or open in browser. */
@@ -222,57 +259,44 @@ const App = () => {
     return undefined;
   }, [downloads, busyUrl]);
 
-  /* Recover active download after page refresh */
-  useEffect(() => {
-    if (busyUrl) return; // already tracking something
-    const activeEntry = Object.entries(downloads).find(([, p]) => ACTIVE_STAGES.has(p.stage));
-    if (activeEntry) setBusyUrl(activeEntry[0]);
-    // Only run on first mount (when downloads first becomes available)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloads]);
-
   const interceptModal = intercept ? <InterceptModal intercept={intercept} onClose={() => setIntercept(null)} /> : null;
 
-  if (tabItems.length === 0 || dismissed) return interceptModal;
-
-  /* active progress */
-  const primary = tabItems[0];
-  const activeItem = busyUrl
-    ? (tabItems.find(it => it.id === busyUrl) ??
-      tabItems.find(it => {
-        const stage = downloads[busyUrl]?.stage;
-        return stage != null && ACTIVE_STAGES.has(stage) && it.kind !== 'mse';
-      }))
-    : tabItems.find(it => {
-        const p = downloads[it.id];
-        return p != null && ACTIVE_STAGES.has(p.stage);
-      });
-  const isBusy = !!activeItem;
-
-  /* positioning */
-  const MIN_W = 280,
-    MIN_H = 160;
-  const mainVideo = videos
-    .filter(v => v.rect.width >= MIN_W && v.rect.height >= MIN_H)
-    .reduce<
-      VideoEntry | undefined
-    >((b, c) => (!b ? c : c.rect.width * c.rect.height > b.rect.width * b.rect.height ? c : b), undefined);
-
-  /* Hysteresis */
-  let effectiveVideo = mainVideo;
-  if (!mainVideo && (open || isHovered || isBusy)) {
-    effectiveVideo = prevVideoRef.current;
-  }
-  if (effectiveVideo) {
-    prevVideoRef.current = effectiveVideo;
-  }
+  const mainVideo = selectVisiblePlayer(videos, window.innerWidth, window.innerHeight);
+  const previous = prevVideoRef.current;
+  const holdPrevious =
+    (open || isHovered) &&
+    previous?.el.isConnected &&
+    visiblePlayerArea(previous.el.getBoundingClientRect(), window.innerWidth, window.innerHeight) > 0;
+  const effectiveVideo = holdPrevious ? previous : mainVideo;
+  prevVideoRef.current = effectiveVideo;
   positionedVideoRef.current = effectiveVideo?.el ?? null;
 
-  if (!effectiveVideo) return interceptModal;
+  const player = effectiveVideo?.el;
+  const primary = player
+    ? resolvePlayerMedia(tabItems, {
+        sourceUrls: [
+          player.currentSrc,
+          player.src,
+          ...Array.from(player.querySelectorAll('source')).map(source => source.src),
+        ],
+        posterUrl: player.poster,
+        pageUrl: window.location.href,
+        playerCount: videos.length,
+      })
+    : undefined;
 
-  const prog = busyUrl ? downloads[busyUrl] : null;
+  // A recycled DOM player can change asset without changing its element.
+  useEffect(() => {
+    setOpen(false);
+    setIsHovered(false);
+  }, [primary?.id]);
 
-  const rows = buildRows(tabItems);
+  if (!effectiveVideo || !primary) return interceptModal;
+  const currentProgress = downloads[primary.id];
+  const hasActiveProgress = !!currentProgress && ACTIVE_STAGES.has(currentProgress.stage);
+  const isBusy = hasActiveProgress || busyUrl === primary.id;
+  const prog = isBusy ? (currentProgress ?? null) : null;
+  const rows = buildRows([primary]);
   const bestVariant = primary.variants?.length ? pickBestVariant(primary.variants) : undefined;
   const expanded = isHovered || open;
 
@@ -281,10 +305,19 @@ const App = () => {
       {interceptModal}
       <div
         ref={ref}
-        onMouseEnter={() => setIsHovered(true)}
+        onMouseEnter={() => {
+          if (hoverCloseTimerRef.current !== null) {
+            clearTimeout(hoverCloseTimerRef.current);
+            hoverCloseTimerRef.current = null;
+          }
+          setIsHovered(true);
+        }}
         onMouseLeave={() => {
-          setIsHovered(false);
-          setOpen(false);
+          hoverCloseTimerRef.current = setTimeout(() => {
+            hoverCloseTimerRef.current = null;
+            setIsHovered(false);
+            setOpen(false);
+          }, 180);
         }}
         style={{
           position: 'fixed',

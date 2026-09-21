@@ -78,7 +78,13 @@ export const useMediaPage = () => {
   }, [currentMedia]);
 
   useEffect(() => {
-    if (downloadState.busyUrl) return;
+    if (downloadState.busyUrl) {
+      const busyEntry =
+        downloads[downloadState.busyUrl] ??
+        Object.values(downloads).find(entry => entry.item?.id === downloadState.busyUrl);
+      if (busyEntry) setDownloadState({ busyUrl: null, error: null });
+      return;
+    }
     // Note: 'queued' deliberately excluded so the popup doesn't peg busyUrl to a
     // queued item — users should be able to start more downloads while one runs.
     const ACTIVE = new Set(['init', 'fetch-manifest', 'download-video', 'download-audio', 'mux', 'finalize']);
@@ -126,7 +132,11 @@ export const useMediaPage = () => {
     if (!response?.ok) {
       setDownloadState({ busyUrl: null, error: response?.error ?? 'Download failed' });
     } else {
-      setDownloadState({ busyUrl: null, error: null });
+      // Keep the local busy marker until the first storage progress snapshot
+      // arrives. The enqueue response only means the job was accepted;
+      // clearing it here briefly restores the Download button while the
+      // storage update is still in flight.
+      setDownloadState({ busyUrl: item.id, error: null });
     }
   };
 

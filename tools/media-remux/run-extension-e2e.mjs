@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, '../..');
-const extensionDirectory = path.join(repositoryRoot, 'dist');
+const extensionDirectory = process.env.VIDSY_EXTENSION_DIR ?? path.join(repositoryRoot, '.output/chrome-mv3');
+const extensionManifest = JSON.parse(await readFile(path.join(extensionDirectory, 'manifest.json'), 'utf8'));
+const popupPath = extensionManifest.action?.default_popup ?? 'popup.html';
 const fixtureDirectory = process.env.VIDSY_MEDIA_FIXTURES ?? '/tmp/vidsy-web-media-remux/fixtures-full';
 const chromeBinary = process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const e2eRoot = await mkdtemp(path.join(os.tmpdir(), 'vidsy-extension-e2e-'));
@@ -259,9 +261,9 @@ try {
 
   const extensionUrl = new URL(vidsyWorker.target.url);
   const extensionOrigin = `${extensionUrl.protocol}//${extensionUrl.host}`;
-  await browser.send('Target.createTarget', { url: `${extensionOrigin}/popup/index.html` });
+  await browser.send('Target.createTarget', { url: `${extensionOrigin}/${popupPath}` });
   const popupTarget = await waitForTarget(
-    target => target.url.includes('/popup/index.html') && target.type !== 'service_worker',
+    target => target.url === `${extensionOrigin}/${popupPath}` && target.type !== 'service_worker',
     'extension popup',
   );
   popup = new Cdp(popupTarget.webSocketDebuggerUrl);
@@ -278,6 +280,52 @@ try {
     await sleep(100);
   }
   if (!mediaVisible) throw new Error('Popup did not display the generic HLS detection');
+
+  // Regression: the popup media card must consume the same live progress
+  // entry as the content overlay. Use a fixed snapshot so this assertion is
+  // deterministic and does not depend on fixture download speed.
+  await evaluate(
+    worker,
+    `(async () => {
+      const key = ${JSON.stringify(detection.id)};
+      await chrome.storage.session.set({
+        'media-downloads': {
+          [key]: {
+            key,
+            stage: 'download-video',
+            downloadedBytes: 23,
+            estimatedBytes: 100,
+            item: ${JSON.stringify(detection)},
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        },
+      });
+    })()`,
+  );
+  let popupShowsProgress = false;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    popupShowsProgress = await evaluate(
+      popup,
+      `document.body?.innerText.includes('23%') &&
+       ![...document.querySelectorAll('button')].some(item => item.textContent?.trim() === 'Download')`,
+    );
+    if (popupShowsProgress) break;
+    await sleep(100);
+  }
+  if (!popupShowsProgress) {
+    const popupText = await evaluate(popup, `document.body?.innerText`);
+    throw new Error(`Popup media card did not render live 23% progress: ${popupText}`);
+  }
+  await evaluate(worker, `chrome.storage.session.set({ 'media-downloads': {} })`);
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const hasDownloadButton = await evaluate(
+      popup,
+      `[...document.querySelectorAll('button')].some(item => item.textContent?.trim() === 'Download')`,
+    );
+    if (hasDownloadButton) break;
+    await sleep(100);
+  }
 
   const clicked = await evaluate(
     popup,
@@ -360,6 +408,7 @@ try {
   page?.close();
   browser.close();
   chrome.kill('SIGTERM');
+  await new Promise(resolve => chrome.once('exit', resolve));
   await new Promise(resolve => server.close(resolve));
   if (process.env.VIDSY_KEEP_E2E_ARTIFACTS !== '1') {
     const outputPath = process.env.VIDSY_EXTENSION_E2E_OUTPUT;

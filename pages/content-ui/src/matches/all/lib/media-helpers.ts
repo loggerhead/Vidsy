@@ -10,7 +10,40 @@ const topLevelQuality = (item: MediaItem): string => (item.resolution ? shortEdg
 
 export type VideoEntry = { el: HTMLVideoElement; id: string; rect: DOMRect };
 
-export const ACTIVE_STAGES = new Set(['init', 'fetch-manifest', 'download-video', 'download-audio', 'mux', 'finalize']);
+export const ACTIVE_STAGES = new Set([
+  'queued',
+  'init',
+  'fetch-manifest',
+  'download-video',
+  'download-audio',
+  'mux',
+  'finalize',
+]);
+
+export const describeProgress = (progress?: {
+  stage: string;
+  downloadedBytes?: number;
+  estimatedBytes?: number;
+  muxPercent?: number;
+  queuePosition?: number;
+}): string => {
+  if (!progress) return 'Starting';
+  if (progress.stage === 'queued') {
+    return progress.queuePosition && progress.queuePosition > 1 ? `Queued #${progress.queuePosition}` : 'Queued';
+  }
+  if (progress.stage === 'fetch-manifest') return 'Manifest';
+  if (progress.stage === 'mux') return progress.muxPercent !== undefined ? `Mux ${progress.muxPercent}%` : 'Muxing';
+  if (progress.stage === 'finalize') return 'Saving';
+  if (progress.estimatedBytes && progress.estimatedBytes > 0) {
+    const pct = Math.min(99, Math.floor(((progress.downloadedBytes ?? 0) / progress.estimatedBytes) * 100));
+    return `${pct}%`;
+  }
+  if (progress.downloadedBytes && progress.downloadedBytes > 0) return formatBytes(progress.downloadedBytes);
+  if (progress.stage === 'download-audio') return 'Audio';
+  if (progress.stage === 'download-video') return 'Video';
+  if (progress.stage === 'init') return 'Starting';
+  return progress.stage;
+};
 
 export const pickBestVariant = (vs: MediaVariant[]): MediaVariant | undefined =>
   vs.reduce<MediaVariant | undefined>((b, c) => {
