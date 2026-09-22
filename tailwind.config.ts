@@ -1,4 +1,4 @@
-import { withUI } from '@extension/ui';
+import { withUI } from '@extension/ui/with-ui';
 import type { Config } from 'tailwindcss';
 
 export default withUI({

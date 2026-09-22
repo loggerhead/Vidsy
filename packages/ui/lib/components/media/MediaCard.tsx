@@ -91,27 +91,8 @@ export const MediaCard = ({
     'mux',
     'finalize',
   ]);
-  // Download progress is keyed by the stable media item id. Keep the item
-  // snapshot fallback for entries created before a detection refresh replaced
-  // the current item's object.
-  const itemUrls = new Set(
-    [
-      item.url,
-      item.audioUrl,
-      ...(item.variants?.flatMap(variant => [variant.url, variant.audioUrl]) ?? []),
-      ...(item.hlsChildUrls ?? []),
-    ].filter((url): url is string => Boolean(url)),
-  );
-  const progress =
-    downloads[item.id] ??
-    Object.values(downloads).find(
-      entry =>
-        entry.item?.id === item.id ||
-        entry.item?.url === item.url ||
-        entry.key === item.id ||
-        itemUrls.has(entry.key) ||
-        (entry.item && (entry.item.url === item.url || itemUrls.has(entry.item.url))),
-    );
+  // Download submission and progress storage share the stable media item id.
+  const progress = downloads[item.id];
   const locallyBusy = downloadState.busyUrl === item.id;
   const isBusy = locallyBusy || (progress != null && ACTIVE_STAGES.has(progress.stage));
   // The enqueue response can arrive before the first storage progress update.

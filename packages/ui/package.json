@@ -9,7 +9,12 @@
     "dist/**"
   ],
   "types": "index.ts",
-  "main": "dist/index.js",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./global.css": "./global.css",
+    "./with-ui": "./lib/with-ui.ts"
+  },
   "scripts": {
     "clean:bundle": "rimraf dist",
     "clean:node_modules": "pnpx rimraf node_modules",
