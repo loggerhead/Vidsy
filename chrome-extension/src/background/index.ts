@@ -18,6 +18,7 @@ import {
   setupHeaderCapture,
 } from './lib/header-capture';
 import { deriveKind, deriveFileName } from './lib/media-utils';
+import { createNetworkCaptureAdmission } from './lib/network-capture-admission';
 import { classifyAndAddUrl } from './lib/paste-url';
 import { updateProgress, clearProgress, clearTerminalProgress } from './lib/progress';
 import { createTabWorkLifecycle } from './lib/tab-work-lifecycle';
@@ -68,6 +69,34 @@ export const startBackground = (): void => {
   });
   configureDetectionTabLifecycle(tabWork);
   configureHeaderCaptureTabFilter(tabId => tabWork.isCapturing(tabId));
+  const initialTabCaptureReady = chrome.tabs
+    .query({ active: true, currentWindow: true })
+    .then(([tab]) => (tab?.id === undefined ? undefined : tabWork.activate(tab.id, tab.status === 'complete', tab.url)))
+    .then(() => undefined)
+    .catch(() => undefined);
+  const admitNetworkResponse = createNetworkCaptureAdmission({
+    bootstrap: initialTabCaptureReady,
+    prepareCapture: async tabId => {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        await tabWork.prepareCapture(tabId, tab.status === 'loading', tab.url, tab.active);
+      } catch {
+        // The tab disappeared before the response could be attributed.
+      }
+    },
+    isCapturing: tabId => tabWork.isCapturing(tabId),
+    ensureCapturing: async tabId => {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab.active) return false;
+        await tabWork.activate(tabId, tab.status === 'complete', tab.url);
+        return tabWork.isCapturing(tabId);
+      } catch {
+        return false;
+      }
+    },
+    handle: handleNetworkDetection,
+  });
 
   void configureSessionAccessLevel().catch((error: unknown) => {
     log.error('storage.session_access_failed', error);
@@ -92,7 +121,6 @@ export const startBackground = (): void => {
   // ─── Network detection listener ───
   chrome.webRequest.onResponseStarted.addListener(
     details => {
-      if (!tabWork.isCapturing(details.tabId)) return;
       log.debug('network.response_started', {
         tabId: details.tabId,
         type: details.type,
@@ -100,7 +128,7 @@ export const startBackground = (): void => {
         statusCode: details.statusCode,
         initiator: details.initiator,
       });
-      void handleNetworkDetection(details);
+      void admitNetworkResponse(details);
     },
     { urls: ['<all_urls>'], types: ['media', 'xmlhttprequest', 'other'] },
     ['responseHeaders', 'extraHeaders'],
@@ -399,7 +427,7 @@ export const startBackground = (): void => {
   });
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     if (changeInfo.status === 'loading' || changeInfo.url !== undefined) {
-      void tabWork.navigationStarted(tabId);
+      void tabWork.navigationStarted(tabId, changeInfo.url);
       return;
     }
     if (changeInfo.status === 'complete') void tabWork.pageReady(tabId);
@@ -407,14 +435,9 @@ export const startBackground = (): void => {
   chrome.tabs.onActivated.addListener(({ tabId }) => {
     void chrome.tabs
       .get(tabId)
-      .then(tab => tabWork.activate(tabId, tab.status === 'complete'))
+      .then(tab => tabWork.activate(tabId, tab.status === 'complete', tab.url))
       .catch(() => undefined);
   });
-  void chrome.tabs
-    .query({ active: true, currentWindow: true })
-    .then(([tab]) => (tab?.id === undefined ? undefined : tabWork.activate(tab.id, tab.status === 'complete')))
-    .catch(() => undefined);
-
   // ─── Context menu ───
   const createContextMenus = () => {
     // Idempotent — re-creating on service-worker restart throws "duplicate id".

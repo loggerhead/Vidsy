@@ -36,6 +36,21 @@ test('refresh cancels, clears the old generation, then starts the replacement on
   assert.deepEqual(events, ['start:1:0', 'stop:1:1:true', 'start:1:1']);
 });
 
+test('duplicate loading and URL notifications advance an inactive tab only once', async () => {
+  const lifecycle = createTabWorkLifecycle({
+    start: async () => undefined,
+    stop: async () => undefined,
+  });
+
+  await lifecycle.navigationStarted(1, 'https://example.com/watch');
+  const generation = lifecycle.generationForCapture(1);
+  await lifecycle.navigationStarted(1, 'https://example.com/watch');
+
+  assert.equal(generation, undefined);
+  await lifecycle.activate(1, false, 'https://example.com/watch');
+  assert.equal(lifecycle.generationForCapture(1), 1);
+});
+
 test('navigation captures early network requests while old-document cleanup is still pending', async () => {
   let releaseCleanup!: () => void;
   const cleanup = new Promise<void>(resolve => {
@@ -70,6 +85,96 @@ test('navigation captures early network requests while old-document cleanup is s
 
   await lifecycle.pageReady(1);
   assert.equal(lifecycle.isRunning(1), true);
+});
+
+test('initial loading activation and navigation share one capture generation', async () => {
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
+    stop: async work => void events.push(`stop:${work.tabId}:${work.generation}`),
+  });
+
+  await lifecycle.activate(1, false);
+  const earlyGeneration = lifecycle.generationForCapture(1);
+  await lifecycle.navigationStarted(1);
+
+  assert.equal(earlyGeneration, 0);
+  assert.equal(lifecycle.isCurrent(1, earlyGeneration!), true);
+  assert.deepEqual(events, []);
+
+  await lifecycle.pageReady(1);
+  assert.deepEqual(events, ['start:1:0']);
+});
+
+test('loading activation stays in the same generation even if document work started first', async () => {
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
+    stop: async work => void events.push(`stop:${work.tabId}:${work.generation}`),
+  });
+
+  await lifecycle.activate(1, false);
+  await lifecycle.activate(1, true);
+  await lifecycle.navigationStarted(1);
+
+  assert.equal(lifecycle.generationForCapture(1), 0);
+  assert.deepEqual(events, ['start:1:0']);
+});
+
+test('a response aligns a completed replacement URL before onUpdated arrives', async () => {
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
+    stop: async work => void events.push(`stop:${work.tabId}:${work.generation}`),
+  });
+
+  await lifecycle.activate(1, true, 'about:blank');
+  await lifecycle.prepareCapture(1, false, 'https://example.com/watch');
+
+  assert.equal(lifecycle.generationForCapture(1), 1);
+  assert.deepEqual(events, ['start:1:0', 'stop:1:1']);
+
+  await lifecycle.navigationStarted(1, 'https://example.com/watch');
+  await lifecycle.pageReady(1);
+  assert.equal(lifecycle.generationForCapture(1), 1);
+  assert.deepEqual(events, ['start:1:0', 'stop:1:1', 'start:1:1']);
+});
+
+test('a response cannot establish capture for an inactive unknown tab', async () => {
+  const lifecycle = createTabWorkLifecycle({
+    start: async () => undefined,
+    stop: async () => undefined,
+  });
+
+  await lifecycle.prepareCapture(1, true, 'https://example.com/watch', false);
+
+  assert.equal(lifecycle.isCapturing(1), false);
+  assert.equal(lifecycle.generationForCapture(1), undefined);
+});
+
+test('a response can establish generation zero for a newly active loading tab', async () => {
+  const lifecycle = createTabWorkLifecycle({
+    start: async () => undefined,
+    stop: async () => undefined,
+  });
+
+  await lifecycle.prepareCapture(1, true, 'https://example.com/watch', true);
+
+  assert.equal(lifecycle.isCapturing(1), true);
+  assert.equal(lifecycle.generationForCapture(1), 0);
+});
+
+test('a response restores page work for a newly active tab that already completed', async () => {
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
+    stop: async () => undefined,
+  });
+
+  await lifecycle.prepareCapture(1, false, 'https://example.com/watch', true);
+
+  assert.equal(lifecycle.generationForCapture(1), 0);
+  assert.deepEqual(events, ['start:1:0']);
 });
 
 test('closing a tab cancels its work without starting a replacement', async () => {
