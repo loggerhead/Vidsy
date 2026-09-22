@@ -1,8 +1,9 @@
+import { qualityLabel } from '@extension/shared';
 import type { MediaItem, MediaVariant } from '@extension/shared';
 
 // "Nnnnp" conventionally names the short edge (1080p = 1920×1080 landscape or
 // 1080×1920 portrait), not whichever side happens to be the height field.
-const shortEdgeLabel = (r: { width: number; height: number }) => `${Math.min(r.width, r.height)}p`;
+const shortEdgeLabel = qualityLabel;
 
 type Row = { sub: string; item: MediaItem; variant?: MediaVariant };
 

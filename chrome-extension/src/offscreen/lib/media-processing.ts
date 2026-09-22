@@ -1,6 +1,6 @@
 type MediaInputKind = 'hls' | 'dash' | 'direct' | 'separate-tracks';
 type MediaContainer = 'mpegts' | 'mp4' | 'webm' | 'aac' | 'mp3' | 'wav' | 'unknown';
-type MediaCodec = 'h264' | 'hevc' | 'aac' | 'vp9' | 'opus' | 'mp3' | 'pcm' | 'unknown';
+type MediaCodec = 'h264' | 'hevc' | 'av1' | 'aac' | 'vp9' | 'opus' | 'mp3' | 'pcm' | 'unknown';
 type MediaTrackType = 'video' | 'audio';
 type OutputContainer = 'mp4' | 'webm' | 'mp3';
 
@@ -41,7 +41,9 @@ type MediaCapabilities = {
 const WEB_MEDIA_REMUX_CAPABILITIES: MediaCapabilities = {
   variant: 'web-media-remux-cli',
   demuxers: ['mpegts', 'mp4', 'webm', 'aac', 'mp3'],
-  parsers: ['h264', 'hevc', 'aac', 'vp9', 'opus', 'mp3'],
+  // This is a stream-copy capability list, not a decoder list. The bundled
+  // engine can demux and mux AV1-in-MP4 without decoding video frames.
+  parsers: ['h264', 'hevc', 'av1', 'aac', 'vp9', 'opus', 'mp3'],
   muxers: ['mp4', 'webm', 'mp3'],
   bitstreamFilters: ['extract_extradata', 'h264_mp4toannexb', 'hevc_mp4toannexb', 'aac_adtstoasc'],
   decoders: ['aac', 'opus', 'mp3'],
@@ -184,7 +186,7 @@ const planMediaProcessing = (
     };
   }
 
-  if (!['h264', 'hevc'].includes(video.codec) || (audio && audio.codec !== 'aac')) {
+  if (!['h264', 'hevc', 'av1'].includes(video.codec) || (audio && audio.codec !== 'aac')) {
     return unsupported('incompatible-output-container', 'The input tracks cannot be copied into MP4');
   }
   if (!supports(capabilities.muxers, 'mp4')) {
@@ -250,6 +252,7 @@ const codecAliases: Record<string, MediaCodec> = {
   hev1: 'hevc',
   hvc1: 'hevc',
   hevc: 'hevc',
+  av01: 'av1',
   mp4a: 'aac',
   aac: 'aac',
   vp09: 'vp9',
@@ -272,7 +275,7 @@ const tracksFromCodecString = (codecString: string | undefined, source: MediaEvi
     .filter(Boolean)
     .map(value => {
       const codec = normalizeCodec(value);
-      const type: MediaTrackType = ['h264', 'hevc', 'vp9'].includes(codec) ? 'video' : 'audio';
+      const type: MediaTrackType = ['h264', 'hevc', 'av1', 'vp9'].includes(codec) ? 'video' : 'audio';
       return { type, codec, codecString: value, evidence: { source, confidence: 'declared' } };
     });
 

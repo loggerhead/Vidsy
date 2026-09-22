@@ -52,6 +52,27 @@ test('bounded byte probe identifies MP4 and WebM tracks without URL hints', asyn
   );
 });
 
+test('bounded MP4 probe recognises AV1 sample entries', () => {
+  const bytes = new Uint8Array([
+    0,
+    0,
+    0,
+    20,
+    ...Buffer.from('ftyp'),
+    ...Buffer.from('iso5'),
+    0,
+    0,
+    0,
+    0,
+    ...Buffer.from('av01'),
+  ]);
+
+  assert.deepEqual(
+    probeMediaBytes(bytes).tracks.map(track => [track.type, track.codec]),
+    [['video', 'av1']],
+  );
+});
+
 test('unknown bytes remain unknown', () => {
   assert.deepEqual(probeMediaBytes(new Uint8Array([1, 2, 3, 4])), {
     container: 'unknown',

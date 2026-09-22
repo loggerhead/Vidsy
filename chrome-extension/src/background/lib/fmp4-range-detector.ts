@@ -42,7 +42,10 @@ const PROBE_TIMEOUT_MS = 8000;
 const GROUP_TTL_MS = 2 * 60 * 1000;
 
 const groupsByTab = new Map<string, Map<string, Fmp4Group>>();
-const probedUrls = new Set<string>();
+// Probe identity belongs to a tab/document lifecycle. Keeping one process-wide
+// set makes a reload miss a reused signed URL even after its groups were
+// cleared, recreating the same "only MSE remains" failure as a late start.
+const probedUrlsByTab = new Map<string, Set<string>>();
 
 const contentRangeHeader = (headers?: chrome.webRequest.HttpHeader[]): string | undefined =>
   headers?.find(h => h.name.toLowerCase() === 'content-range')?.value;
@@ -296,6 +299,9 @@ const handleFmp4RangeDetection = async (args: {
 }): Promise<Fmp4Detection> => {
   const byteRange = parseContentRange(contentRangeHeader(args.responseHeaders));
   if (!byteRange || byteRange.start !== 0) return { handled: false };
+  const tabKey = args.tabId !== undefined ? String(args.tabId) : 'unknown';
+  const probedUrls = probedUrlsByTab.get(tabKey) ?? new Set<string>();
+  if (!probedUrlsByTab.has(tabKey)) probedUrlsByTab.set(tabKey, probedUrls);
   if (probedUrls.has(args.url)) return { handled: true };
 
   const key = groupKeyFor(args.url);
@@ -309,7 +315,6 @@ const handleFmp4RangeDetection = async (args: {
   const track = parseFmp4InitSegment(initSegment);
   if (!track) return { handled: true };
 
-  const tabKey = args.tabId !== undefined ? String(args.tabId) : 'unknown';
   const groups = groupsByTab.get(tabKey) ?? new Map<string, Fmp4Group>();
   if (!groupsByTab.has(tabKey)) groupsByTab.set(tabKey, groups);
 
@@ -320,7 +325,10 @@ const handleFmp4RangeDetection = async (args: {
 
   const stream: Fmp4Stream = {
     url: args.url,
-    mimeType: track.kind === 'audio' && args.mimeType?.startsWith('video/') ? 'audio/mp4' : args.mimeType,
+    // The parsed MP4 handler is stronger evidence than the HTTP Content-Type.
+    // CDNs commonly serve both .m4s tracks as application/octet-stream (or
+    // even label audio as video), which must not leak into download planning.
+    mimeType: track.kind === 'audio' ? 'audio/mp4' : 'video/mp4',
     contentLength: byteRange.total,
     codecs: track.codecs,
     resolution: track.width && track.height ? { width: track.width, height: track.height } : undefined,
@@ -335,7 +343,9 @@ const handleFmp4RangeDetection = async (args: {
 };
 
 const clearFmp4RangeDetectionsForTab = (tabId: number) => {
-  groupsByTab.delete(String(tabId));
+  const tabKey = String(tabId);
+  groupsByTab.delete(tabKey);
+  probedUrlsByTab.delete(tabKey);
 };
 
 export { clearFmp4RangeDetectionsForTab, handleFmp4RangeDetection, parseFmp4InitSegment };

@@ -1,4 +1,4 @@
-import { reconcilePlayerEvidence } from './detection-evidence';
+import { reconcilePlayerEvidence, selectRicherVariants } from './detection-evidence';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { MediaItem } from '@extension/shared';
@@ -61,6 +61,15 @@ test('an MSE observation cannot replace an existing structured variant authority
 
   assert.equal(result.consumed, true);
   assert.deepEqual(result.items, [authority]);
+});
+
+test('progressive fMP4 evidence grows the variant set without regressing on stale observations', () => {
+  const first = [{ url: 'https://cdn.example/video-1080.m4s' }];
+  const complete = [...first, { url: 'https://cdn.example/video-720.m4s' }];
+
+  assert.equal(selectRicherVariants(first, complete), complete);
+  assert.equal(selectRicherVariants(complete, first), complete);
+  assert.equal(selectRicherVariants(complete, undefined), complete);
 });
 
 test('HLS children collapse into their master in either arrival order without swallowing another video', async () => {

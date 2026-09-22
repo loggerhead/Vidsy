@@ -20,10 +20,10 @@ import {
 import { deriveKind, deriveFileName } from './lib/media-utils';
 import { classifyAndAddUrl } from './lib/paste-url';
 import { updateProgress, clearProgress, clearTerminalProgress } from './lib/progress';
-import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
-import type { MediaMessage } from '@extension/shared';
-import { configureSessionAccessLevel } from '@extension/storage';
 import { createTabWorkLifecycle } from './lib/tab-work-lifecycle';
+import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
+import { configureSessionAccessLevel } from '@extension/storage';
+import type { MediaMessage } from '@extension/shared';
 
 export const startBackground = (): void => {
   const log = createLogger('background');
@@ -51,6 +51,10 @@ export const startBackground = (): void => {
       ]);
     },
     stop: async ({ tabId }) => {
+      // Header capture is tab-scoped, so clear it synchronously before the
+      // first await. Otherwise an early request from the replacement document
+      // can be captured and then erased by delayed old-document cleanup.
+      clearCapturedHeadersForTab(tabId);
       await Promise.all([
         dispatchTabLifecycleEvent(tabId, 'vidsy:stop-content', true),
         dispatchTabLifecycleEvent(tabId, 'vidsy:stop-content-ui', false),
@@ -60,11 +64,10 @@ export const startBackground = (): void => {
         dispatchTabLifecycleEvent(tabId, 'vidsy:stop-vimeo-main', false),
       ]);
       await Promise.all([clearTabDetections(tabId), cancelDownloadsForTab(tabId)]);
-      clearCapturedHeadersForTab(tabId);
     },
   });
   configureDetectionTabLifecycle(tabWork);
-  configureHeaderCaptureTabFilter(tabId => tabWork.isRunning(tabId));
+  configureHeaderCaptureTabFilter(tabId => tabWork.isCapturing(tabId));
 
   void configureSessionAccessLevel().catch((error: unknown) => {
     log.error('storage.session_access_failed', error);
@@ -89,7 +92,7 @@ export const startBackground = (): void => {
   // ─── Network detection listener ───
   chrome.webRequest.onResponseStarted.addListener(
     details => {
-      if (!tabWork.isRunning(details.tabId)) return;
+      if (!tabWork.isCapturing(details.tabId)) return;
       log.debug('network.response_started', {
         tabId: details.tabId,
         type: details.type,
@@ -402,7 +405,10 @@ export const startBackground = (): void => {
     if (changeInfo.status === 'complete') void tabWork.pageReady(tabId);
   });
   chrome.tabs.onActivated.addListener(({ tabId }) => {
-    void chrome.tabs.get(tabId).then(tab => tabWork.activate(tabId, tab.status === 'complete')).catch(() => undefined);
+    void chrome.tabs
+      .get(tabId)
+      .then(tab => tabWork.activate(tabId, tab.status === 'complete'))
+      .catch(() => undefined);
   });
   void chrome.tabs
     .query({ active: true, currentWindow: true })

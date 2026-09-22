@@ -13,7 +13,31 @@ const fixtureFile = async (name: string): Promise<File> => {
   return new File([body.buffer], name);
 };
 
-const mp4Plan = (video: 'h264' | 'hevc'): ExecutableMuxPlan => ({
+const ascii = (value: string): number[] => [...value].map(character => character.charCodeAt(0));
+const u32 = (value: number): number[] => [
+  (value >>> 24) & 0xff,
+  (value >>> 16) & 0xff,
+  (value >>> 8) & 0xff,
+  value & 0xff,
+];
+const box = (type: string, body: number[] = []): number[] => [...u32(body.length + 8), ...ascii(type), ...body];
+const trackBox = (handler: 'vide' | 'soun', codec: string): number[] =>
+  box('trak', [
+    ...box('mdia', [
+      ...box('hdlr', [0, 0, 0, 0, 0, 0, 0, 0, ...ascii(handler)]),
+      ...box('minf', [...box('stbl', [...box('stsd', [0, 0, 0, 0, ...u32(1), ...box(codec)])])]),
+    ]),
+  ]);
+const minimalAv1AacMp4 = (): File => {
+  const bytes = new Uint8Array([
+    ...box('ftyp', [...ascii('isom'), 0, 0, 0, 0]),
+    ...box('moov', [...trackBox('vide', 'av01'), ...trackBox('soun', 'mp4a')]),
+    ...box('mdat', [1]),
+  ]);
+  return new File([bytes], 'av1-aac.mp4');
+};
+
+const mp4Plan = (video: 'h264' | 'hevc' | 'av1'): ExecutableMuxPlan => ({
   type: 'copy-to-mp4',
   output: { container: 'mp4', extension: '.mp4', mime: 'video/mp4' },
   requiredTracks: [
@@ -22,6 +46,19 @@ const mp4Plan = (video: 'h264' | 'hevc'): ExecutableMuxPlan => ({
   ],
   prefetchToOpfs: false,
   videoTag: video === 'hevc' ? 'hvc1' : undefined,
+});
+
+test('validates stream-copied AV1 and AAC MP4 output', async () => {
+  const artifact = await validateOutputArtifact({
+    file: minimalAv1AacMp4(),
+    opfsName: 'av1-output.mp4',
+    plan: mp4Plan('av1'),
+  });
+
+  assert.deepEqual(artifact.tracks, [
+    { type: 'video', codec: 'av1' },
+    { type: 'audio', codec: 'aac' },
+  ]);
 });
 
 test('validates MP4 container, required tracks, codecs, and duration', async () => {

@@ -6,7 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, '../..');
-const extensionDirectory = path.join(repositoryRoot, 'dist');
+// WXT's authoritative unpacked output. Keep the override for testing an
+// explicitly supplied artifact; never silently fall back to the frozen
+// pre-migration `dist/` tree.
+const extensionDirectory = path.resolve(
+  process.env.VIDSY_EXTENSION_DIR ?? path.join(repositoryRoot, '.output/chrome-mv3'),
+);
 const bilibiliUrl =
   process.env.VIDSY_BILIBILI_URL ??
   'https://www.bilibili.com/video/BV1HnM269EV7/?spm_id_from=333.1007.tianma.1-3-3.click&vd_source=94e84eeb9c84c0082db21db3c32160ff';
@@ -188,6 +193,10 @@ const mediaRequest = url =>
     /playurl|x\/player\/playurl/i.test(url));
 
 const attachTarget = async target => {
+  // Chrome exposes internal UI/background targets that either do not
+  // implement Runtime.enable or never answer it. They are irrelevant to this
+  // diagnostic and previously prevented us from reaching the Vidsy worker.
+  if (!['page', 'service_worker', 'worker'].includes(target.type)) return undefined;
   if (!target.webSocketDebuggerUrl || clients.has(target.id)) return clients.get(target.id);
   const client = new Cdp(target.webSocketDebuggerUrl, target);
   clients.set(target.id, client);
@@ -310,7 +319,15 @@ const waitForDetection = async () => {
     await report('service_worker', 'storage.snapshot', last ?? {});
     if (snapshotNumber++ % 5 === 0) await report('page', 'state.snapshot', await pageSnapshot());
     const items = Object.values(last?.['media-detections'] ?? {}).flat();
-    const candidate = items.find(item => item.pageUrl && safeUrl(item.pageUrl) === safeUrl(bilibiliUrl));
+    const candidate = items.find(
+      item =>
+        item.pageUrl &&
+        safeUrl(item.pageUrl) === safeUrl(bilibiliUrl) &&
+        item.kind === 'video' &&
+        item.url?.startsWith('http') &&
+        item.audioUrl?.startsWith('http') &&
+        item.variants?.length > 0,
+    );
     if (candidate) return candidate;
     await sleep(1000);
   }
@@ -372,9 +389,9 @@ try {
       hasAudio: Boolean(variant.audioUrl),
     })),
   });
-  if (!detection.variants || detection.variants.length < 2) {
-    throw new Error(`Expected at least two variants, got ${JSON.stringify(detection.variants ?? [])}`);
-  }
+  // Availability depends on account and Bilibili's current quality selection.
+  // The detection contract is a fetchable video+audio presentation, not an
+  // arbitrary minimum number of quality variants.
 
   if (autoDownload) {
     const clicked = await evaluate(

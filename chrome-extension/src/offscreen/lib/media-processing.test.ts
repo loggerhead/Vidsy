@@ -10,7 +10,7 @@ import test from 'node:test';
 import type { MediaDescriptor, MediaProcessingPlan } from './media-processing';
 
 const verified = { source: 'media-probe', confidence: 'verified' } as const;
-const video = (codec: 'h264' | 'hevc' | 'vp9') => ({ type: 'video', codec, evidence: verified }) as const;
+const video = (codec: 'h264' | 'hevc' | 'av1' | 'vp9') => ({ type: 'video', codec, evidence: verified }) as const;
 const audio = (codec: 'aac' | 'opus' | 'unknown') => ({ type: 'audio', codec, evidence: verified }) as const;
 
 const descriptor = (overrides: Partial<MediaDescriptor> = {}): MediaDescriptor => ({
@@ -85,6 +85,18 @@ test('plans fMP4 HLS, DASH, direct MP4, separate tracks, and WebM deterministica
     'copy-to-webm',
   );
   assert.equal(webm.output.mime, 'video/webm');
+
+  const av1 = executable(
+    planMediaProcessing(
+      descriptor({ inputKind: 'separate-tracks', container: 'mp4', tracks: [video('av1'), audio('aac')] }),
+      'media',
+    ),
+    'copy-to-mp4',
+  );
+  assert.deepEqual(av1.requiredTracks, [
+    { type: 'video', codec: 'av1' },
+    { type: 'audio', codec: 'aac' },
+  ]);
 });
 
 test('MP3 is the only transcode plan and requires a decodable audio track', () => {
@@ -156,7 +168,7 @@ test('normalizes declared codec strings without inferring unknown values', () =>
   assert.equal(normalizeCodec('hvc1.1.6.L93.B0'), 'hevc');
   assert.equal(normalizeCodec('vp09.00.10.08'), 'vp9');
   assert.equal(normalizeCodec(undefined), 'unknown');
-  assert.equal(normalizeCodec('av01.0.05M.08'), 'unknown');
+  assert.equal(normalizeCodec('av01.0.05M.08'), 'av1');
   assert.deepEqual(
     tracksFromCodecString('hvc1.1.6.L93.B0, mp4a.40.2', 'manifest').map(track => [track.type, track.codec]),
     [

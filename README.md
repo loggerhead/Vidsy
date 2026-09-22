@@ -62,16 +62,16 @@ For early access to fixes or for development testing:
 
 | Strategy | Source type | Output | Notes |
 |----------|-------------|--------|-------|
-| HTTP direct | MP4 with H.264/HEVC + optional AAC | MP4 | Range-parallel transport when supported; validated passthrough |
-| HLS stream-copy | MPEG-TS or fMP4 with H.264/HEVC + optional AAC | MP4 | Native HLS demux; AES-128 handled; no video transcoding |
+| HTTP direct | MP4 with H.264/HEVC/AV1 + optional AAC | MP4 | Range-parallel transport when supported; validated passthrough |
+| HLS stream-copy | MPEG-TS or fMP4 with H.264/HEVC/AV1 + optional AAC | MP4 | Native HLS demux; AES-128 handled; no video transcoding |
 | HLS audio extraction | Decodable AAC/MP3/Opus audio | MP3 | The only transcoding path; uses `libmp3lame` |
-| DASH stream-copy | MP4 representations with H.264/HEVC + optional AAC | MP4 | Native DASH demux or validated separated-track merge |
-| Merged V+A | Separate H.264/HEVC video and AAC audio tracks | MP4 | Single stream-copy pass with two `jsfetch:` inputs |
+| DASH stream-copy | MP4 representations with H.264/HEVC/AV1 + optional AAC | MP4 | Native DASH demux or validated separated-track merge |
+| Merged V+A | Separate H.264/HEVC/AV1 video and AAC audio tracks | MP4 | Single stream-copy pass with two `jsfetch:` inputs |
 | WebM stream-copy | WebM with VP9 + optional Opus | WebM | Container and tracks remain WebM-compatible |
 | Subtitles | WebVTT / SRT / TTML | SRT | Converted on save |
 
 DRM-protected streams are detected pre-dispatch and rejected with a user-visible message — Vidsy does not attempt decryption of protected content.
-Video is never transcoded. AV1, Vorbis, and codec/container combinations not listed above are rejected unless a future release adds matching fixtures, planner assertions, and end-to-end validation.
+Video is never transcoded. Vorbis and codec/container combinations not listed above are rejected unless a future release adds matching fixtures, planner assertions, and end-to-end validation.
 
 ## Architecture
 

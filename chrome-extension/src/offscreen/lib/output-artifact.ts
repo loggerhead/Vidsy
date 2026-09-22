@@ -107,9 +107,11 @@ const mp4Track = (bytes: Uint8Array, trak: Mp4Box): OutputTrack | undefined => {
       ? 'h264'
       : sampleEntry === 'hvc1' || sampleEntry === 'hev1'
         ? 'hevc'
-        : sampleEntry === 'mp4a'
-          ? 'aac'
-          : 'unknown';
+        : sampleEntry === 'av01'
+          ? 'av1'
+          : sampleEntry === 'mp4a'
+            ? 'aac'
+            : 'unknown';
   return type ? { type, codec } : undefined;
 };
 

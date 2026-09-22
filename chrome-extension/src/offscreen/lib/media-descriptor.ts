@@ -29,6 +29,7 @@ const codecStringsInBytes = (bytes: Uint8Array): MediaTrack[] => {
   const tracks: MediaTrack[] = [];
   if (/(?:avc1|avc3)/.test(text)) tracks.push(verifiedTrack('video', 'h264', 'init-segment'));
   if (/(?:hvc1|hev1)/.test(text)) tracks.push(verifiedTrack('video', 'hevc', 'init-segment'));
+  if (/av01/.test(text)) tracks.push(verifiedTrack('video', 'av1', 'init-segment'));
   if (/vp09|V_VP9/.test(text)) tracks.push(verifiedTrack('video', 'vp9', 'init-segment'));
   if (/mp4a/.test(text)) tracks.push(verifiedTrack('audio', 'aac', 'init-segment'));
   if (/Opus|A_OPUS/.test(text)) tracks.push(verifiedTrack('audio', 'opus', 'init-segment'));

@@ -3,6 +3,7 @@ import {
   reconcilePlayerEvidence,
   sameMainPlayerSession,
   reconcileHlsPlaylistEvidence,
+  selectRicherVariants,
 } from './detection-evidence';
 import { handleFmp4RangeDetection, clearFmp4RangeDetectionsForTab } from './fmp4-range-detector';
 import { findCapturedHeaders } from './header-capture';
@@ -572,7 +573,8 @@ export const upsertDetection = async (
     if (candidate.duration && !existing.duration) patch.duration = candidate.duration;
     if (candidate.resolution && !existing.resolution) patch.resolution = candidate.resolution;
     if (candidate.contentLength && !existing.contentLength) patch.contentLength = candidate.contentLength;
-    if (candidate.variants?.length && !existing.variants?.length) patch.variants = candidate.variants;
+    const variants = selectRicherVariants(existing.variants, candidate.variants);
+    if (variants !== existing.variants) patch.variants = variants;
     if (candidate.hlsChildUrls?.length) patch.hlsChildUrls = candidate.hlsChildUrls;
     if (candidate.audioUrl && !existing.audioUrl) {
       patch.audioUrl = candidate.audioUrl;
@@ -903,8 +905,15 @@ export const clearTabDetections = async (tabId: number) => {
 export const handleNetworkDetection = async (details: chrome.webRequest.WebResponseHeadersDetails) => {
   const url = details.url;
   const tabId = details.tabId;
-  const generation = tabId === undefined ? undefined : tabWorkLifecycle?.generationForRunning(tabId);
+  const generation = tabId === undefined ? undefined : tabWorkLifecycle?.generationForCapture(tabId);
   if (tabId !== undefined && generation === undefined) return;
+  // `onResponseStarted` can precede the replacement document's load event.
+  // Retain that early event, but do not let it write until the previous
+  // generation has finished clearing its detections and captured headers.
+  if (tabId !== undefined && generation !== undefined) {
+    const ready = await tabWorkLifecycle?.waitForCapture(tabId, generation);
+    if (!ready) return;
+  }
   dlLog('detect.network.received', {
     tabId,
     url,

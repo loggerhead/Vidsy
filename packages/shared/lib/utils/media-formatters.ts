@@ -93,9 +93,19 @@ const pickBestVariant = (variants: MediaVariant[]): MediaVariant | undefined =>
     return (curr.bandwidth ?? 0) > (best.bandwidth ?? 0) ? curr : best;
   }, undefined);
 
-// "1080p" conventionally names the short edge — a portrait video of 1080×1920
-// is still "1080p", not "1920p".
-const shortEdgeLabel = (r: { width: number; height: number }) => `${Math.min(r.width, r.height)}p`;
+// Quality labels describe rendition tiers, not exact coded dimensions. Encoders
+// frequently crop a few percent (1920×1018, 854×452) while the presentation is
+// still conventionally called 1080p or 480p. Preserve unusual dimensions when
+// they are not close to a standard tier; exact W×H remains visible in details.
+const QUALITY_TIERS = [144, 240, 360, 480, 540, 720, 1080, 1440, 2160, 4320] as const;
+const qualityLabel = (r: { width: number; height: number }): string => {
+  const shortEdge = Math.min(r.width, r.height);
+  const tier = QUALITY_TIERS.reduce((best, candidate) =>
+    Math.abs(candidate - shortEdge) < Math.abs(best - shortEdge) ? candidate : best,
+  );
+  return `${Math.abs(tier - shortEdge) / tier <= 0.08 ? tier : Math.round(shortEdge)}p`;
+};
+const shortEdgeLabel = qualityLabel;
 
 const formatFileSize = (bytes?: number): string => {
   if (!bytes || bytes <= 0) return '';
@@ -241,6 +251,7 @@ export {
   kindBadgeColor,
   mediaBadgeLabel,
   pickBestVariant,
+  qualityLabel,
   renderFilenameTemplate,
   shortEdgeLabel,
   variantDescriptor,

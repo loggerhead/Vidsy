@@ -1,5 +1,5 @@
 import { deriveFileName } from './media-utils';
-import type { MediaItem } from '@extension/shared';
+import type { MediaItem, MediaVariant } from '@extension/shared';
 
 const hasPairedAudio = (item: Pick<MediaItem, 'kind' | 'audioUrl' | 'variants'>): boolean =>
   item.kind === 'video' && (!!item.audioUrl || !!item.variants?.some(variant => variant.audioUrl));
@@ -13,6 +13,16 @@ const sameMainPlayerSession = (left: MediaItem, right: MediaItem): boolean => {
   if (left.duration && right.duration && Math.abs(left.duration - right.duration) >= 2) return false;
   return true;
 };
+
+// Progressive fMP4 discovery is cumulative: video and audio init ranges can
+// arrive in either order, followed by more video qualities. Once an item has
+// been inserted, only accepting variants when the old list is empty freezes
+// the first partial snapshot. Prefer strictly richer evidence while retaining
+// the existing array for duplicate or out-of-order observations.
+const selectRicherVariants = (
+  existing: MediaVariant[] | undefined,
+  incoming: MediaVariant[] | undefined,
+): MediaVariant[] | undefined => ((incoming?.length ?? 0) > (existing?.length ?? 0) ? incoming : existing);
 
 const combineMseAndFetchable = (mse: MediaItem, fetchable: MediaItem): MediaItem => ({
   ...mse,
@@ -51,7 +61,7 @@ const reconcilePlayerEvidence = (
   };
 };
 
-export { isVariantAuthority, reconcilePlayerEvidence, sameMainPlayerSession };
+export { isVariantAuthority, reconcilePlayerEvidence, sameMainPlayerSession, selectRicherVariants };
 
 // A master owns only the exact child playlists it declares, including unused
 // language/bitrate renditions. Do not infer ownership from directories or tabs.

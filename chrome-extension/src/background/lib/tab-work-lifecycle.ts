@@ -1,4 +1,4 @@
-export type TabWork = {
+type TabWork = {
   tabId: number;
   generation: number;
   signal: AbortSignal;
@@ -14,6 +14,7 @@ type TabRecord = {
   active: boolean;
   restartWhenReady: boolean;
   controller?: AbortController;
+  captureReady: Promise<void>;
 };
 
 /** Owns page-bound work so a tab never runs two document generations at once. */
@@ -23,7 +24,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
   const recordFor = (tabId: number) => {
     let record = records.get(tabId);
     if (!record) {
-      record = { generation: 0, active: false, restartWhenReady: false };
+      record = { generation: 0, active: false, restartWhenReady: false, captureReady: Promise.resolve() };
       records.set(tabId, record);
     }
     return record;
@@ -59,12 +60,20 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
       const mustRestart = Boolean(record.controller) || record.active;
       record.generation += 1;
       record.restartWhenReady = mustRestart;
-      await stopCurrent(tabId, record);
+      // The new document owns network capture as soon as navigation starts.
+      // Its requests may arrive long before `tabs.onUpdated(status=complete)`.
+      // Hold their processing behind old-generation cleanup so the cleanup
+      // cannot erase a newly detected item, while still retaining the early
+      // webRequest event and its response headers.
+      const cleanup = stopCurrent(tabId, record);
+      record.captureReady = cleanup;
+      await cleanup;
     },
 
     async pageReady(tabId: number) {
       const record = recordFor(tabId);
       if (!record.active && !record.restartWhenReady) return;
+      await record.captureReady;
       record.restartWhenReady = false;
       await startCurrent(tabId, record);
     },
@@ -72,6 +81,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
     async close(tabId: number) {
       const record = records.get(tabId);
       if (!record) return;
+      record.active = false;
       record.generation += 1;
       await stopCurrent(tabId, record);
       records.delete(tabId);
@@ -81,6 +91,26 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
       return records.get(tabId)?.controller !== undefined;
     },
 
+    // Network capture and DOM-backed content work deliberately have distinct
+    // readiness. A navigation's initial media request is valid immediately;
+    // content scripts still wait until the replacement document is ready.
+    isCapturing(tabId: number) {
+      return records.get(tabId)?.active === true;
+    },
+
+    generationForCapture(tabId: number): number | undefined {
+      const record = records.get(tabId);
+      return record?.active ? record.generation : undefined;
+    },
+
+    async waitForCapture(tabId: number, generation: number): Promise<boolean> {
+      const record = records.get(tabId);
+      if (!record || !record.active || record.generation !== generation) return false;
+      await record.captureReady;
+      const current = records.get(tabId);
+      return current?.active === true && current.generation === generation;
+    },
+
     generationForRunning(tabId: number): number | undefined {
       const record = records.get(tabId);
       return record?.controller ? record.generation : undefined;
@@ -88,9 +118,10 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
 
     isCurrent(tabId: number, generation: number) {
       const record = records.get(tabId);
-      return record?.generation === generation && record.controller !== undefined;
+      return record?.generation === generation && record.active;
     },
   };
 };
 
+export type { TabWork };
 export type TabWorkLifecycle = ReturnType<typeof createTabWorkLifecycle>;

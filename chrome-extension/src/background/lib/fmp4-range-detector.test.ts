@@ -1,4 +1,4 @@
-import { parseFmp4InitSegment } from './fmp4-range-detector';
+import { clearFmp4RangeDetectionsForTab, handleFmp4RangeDetection, parseFmp4InitSegment } from './fmp4-range-detector';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -46,4 +46,68 @@ test('parseFmp4InitSegment detects an audio track with codec', () => {
     width: undefined,
     height: undefined,
   });
+});
+
+test('clearing a tab also clears its probed URL identity for the next document', async () => {
+  const originalFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = async () => {
+    fetches += 1;
+    return new Response(initSegment('vide', 'avc1', 1280, 720), {
+      status: 206,
+      headers: { 'content-type': 'video/mp4' },
+    });
+  };
+
+  const request = {
+    url: 'https://cdn.example/media/video.m4s?token=stable',
+    tabId: 42,
+    responseHeaders: [{ name: 'Content-Range', value: 'bytes 0-4095/1000000' }],
+    mimeType: 'video/mp4',
+  };
+
+  try {
+    await handleFmp4RangeDetection(request);
+    await handleFmp4RangeDetection(request);
+    assert.equal(fetches, 1);
+
+    clearFmp4RangeDetectionsForTab(42);
+    await handleFmp4RangeDetection(request);
+    assert.equal(fetches, 2);
+  } finally {
+    clearFmp4RangeDetectionsForTab(42);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('parsed fMP4 track kind overrides generic CDN content types', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = String(input);
+    const segment = url.includes('audio') ? initSegment('soun', 'mp4a') : initSegment('vide', 'av01', 1920, 1018);
+    return new Response(segment, { status: 206, headers: { 'content-type': 'application/octet-stream' } });
+  };
+
+  const responseHeaders = [{ name: 'Content-Range', value: 'bytes 0-4095/1000000' }];
+  try {
+    await handleFmp4RangeDetection({
+      url: 'https://cdn.example/asset/video.m4s',
+      tabId: 43,
+      responseHeaders,
+      mimeType: 'application/octet-stream',
+    });
+    const result = await handleFmp4RangeDetection({
+      url: 'https://cdn.example/asset/audio.m4s',
+      tabId: 43,
+      responseHeaders,
+      mimeType: 'application/octet-stream',
+    });
+
+    assert.equal(result.candidate?.mimeType, 'video/mp4');
+    assert.equal(result.candidate?.audioMimeType, 'audio/mp4');
+    assert.equal(result.candidate?.variants?.[0]?.codecs, 'av01');
+  } finally {
+    clearFmp4RangeDetectionsForTab(43);
+    globalThis.fetch = originalFetch;
+  }
 });
