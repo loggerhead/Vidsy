@@ -6,6 +6,7 @@ import {
   upsertDetection,
   clearTabDetections,
   setMainVideoPresent,
+  updatePresentationMetadata,
 } from './lib/detection';
 import { cancelDownloadsForTab, handleDownload, pauseDownload, cancelDownload } from './lib/download';
 import { setupDownloadInterceptor, resumeBrowserDownload, openDownloadsWindow } from './lib/download-interceptor';
@@ -267,6 +268,16 @@ export const startBackground = (): void => {
         const tabId = sender.tab?.id;
         if (tabId !== undefined) setMainVideoPresent(tabId, msg.payload.present);
         sendResponse({ ok: true });
+        return;
+      }
+      if (msg.type === MEDIA_MESSAGE.PRESENTATION_METADATA) {
+        const tabId = sender.tab?.id;
+        if (tabId === undefined) {
+          sendResponse({ ok: false, error: 'Missing sender tab' });
+          return;
+        }
+        const updated = await updatePresentationMetadata(msg.payload.itemId, msg.payload, tabId);
+        sendResponse({ ok: updated });
         return;
       }
       if (msg.type === MEDIA_MESSAGE.PASTE_URL) {

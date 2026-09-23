@@ -26,25 +26,29 @@ const xAssetId = (value: string): string | undefined => {
 
 const unique = (items: MediaItem[]): MediaItem | undefined => (items.length === 1 ? items[0] : undefined);
 
-const resolvePlayerMedia = (items: MediaItem[], player: PlayerEvidence): MediaItem | undefined => {
+type PlayerMediaResolution = { item: MediaItem; authority: 'source' | 'poster' | 'unique-presentation' };
+
+const resolvePlayerMedia = (items: MediaItem[], player: PlayerEvidence): PlayerMediaResolution | undefined => {
   const candidates = items.filter(item => item.kind !== 'mse' && item.kind !== 'audio' && item.kind !== 'subtitle');
   const sources = new Set(player.sourceUrls.filter(url => url && !url.startsWith('blob:')));
   if (sources.size) {
-    return unique(
+    const item = unique(
       candidates.filter(item =>
         [item.url, ...(item.variants?.map(v => v.url) ?? []), ...(item.hlsChildUrls ?? [])].some(url =>
           sources.has(url),
         ),
       ),
     );
+    return item ? { item, authority: 'source' } : undefined;
   }
   const assetId = xAssetId(player.posterUrl);
   if (assetId) {
-    return unique(
+    const item = unique(
       candidates.filter(
         item => xAssetId(item.url) === assetId || item.variants?.some(v => xAssetId(v.url) === assetId),
       ),
     );
+    return item ? { item, authority: 'poster' } : undefined;
   }
   // A single-player document can own one manifest or provider-extracted
   // presentation. Never choose the newest item in a multi-video feed.
@@ -56,7 +60,8 @@ const resolvePlayerMedia = (items: MediaItem[], player: PlayerEvidence): MediaIt
       item.kind === 'mss' ||
       (item.source === 'element' && !!item.variants?.length),
   );
-  return unique(presentations.filter(item => item.pageUrl === player.pageUrl)) ?? unique(presentations);
+  const item = unique(presentations.filter(item => item.pageUrl === player.pageUrl)) ?? unique(presentations);
+  return item ? { item, authority: 'unique-presentation' } : undefined;
 };
 
 type PlayerBox = { width: number; height: number; top: number; bottom: number; left: number; right: number };
@@ -83,4 +88,4 @@ const selectVisiblePlayer = <T extends { rect: PlayerBox; playing: boolean }>(
     }, undefined);
 
 export { resolvePlayerMedia, selectVisiblePlayer, visiblePlayerArea };
-export type { PlayerEvidence, PlayerBox };
+export type { PlayerEvidence, PlayerBox, PlayerMediaResolution };

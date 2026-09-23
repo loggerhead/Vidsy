@@ -56,7 +56,7 @@ const App = () => {
             id: getId(el),
             rect: el.getBoundingClientRect(),
             playing: !el.paused && !el.ended,
-            sourceKey: JSON.stringify([el.currentSrc, el.src, el.poster]),
+            sourceKey: JSON.stringify([el.currentSrc, el.src, el.poster, el.duration]),
           }));
         setVideos(previous => {
           const unchanged =
@@ -272,7 +272,7 @@ const App = () => {
   positionedVideoRef.current = effectiveVideo?.el ?? null;
 
   const player = effectiveVideo?.el;
-  const primary = player
+  const playerResolution = player
     ? resolvePlayerMedia(tabItems, {
         sourceUrls: [
           player.currentSrc,
@@ -284,6 +284,23 @@ const App = () => {
         playerCount: videos.length,
       })
     : undefined;
+  const primary = playerResolution?.item;
+  const resolvedItemId = primary?.id;
+  const resolutionAuthority = playerResolution?.authority;
+  const playerPoster = player?.poster;
+  const playerDuration = player?.duration;
+
+  useEffect(() => {
+    if (!resolvedItemId || resolutionAuthority === 'unique-presentation') return;
+    const thumbnailUrl = playerPoster || null;
+    const duration = Number.isFinite(playerDuration) && (playerDuration ?? 0) > 0 ? playerDuration : undefined;
+    chrome.runtime
+      .sendMessage({
+        type: MEDIA_MESSAGE.PRESENTATION_METADATA,
+        payload: { itemId: resolvedItemId, thumbnailUrl, duration },
+      })
+      .catch(() => undefined);
+  }, [playerDuration, playerPoster, resolutionAuthority, resolvedItemId]);
 
   // A recycled DOM player can change asset without changing its element.
   useEffect(() => {

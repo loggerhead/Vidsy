@@ -1,4 +1,4 @@
-import { reconcilePlayerEvidence, selectRicherVariants } from './detection-evidence';
+import { applyPresentationMetadata, reconcilePlayerEvidence, selectRicherVariants } from './detection-evidence';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { MediaItem } from '@extension/shared';
@@ -45,6 +45,27 @@ test('structured progressive variants replace the MSE placeholder without requir
   assert.deepEqual(result.items[0].variants, fetchable.variants);
 });
 
+test('unresolved MSE metadata cannot become fetchable presentation metadata', () => {
+  const mse = item({
+    id: 'mse',
+    url: 'mse:https://example.com/feed',
+    kind: 'mse',
+    thumbnail: 'data:image/jpeg;base64,unresolved-player',
+    duration: 158,
+  });
+  const fetchable = item({
+    id: 'fetchable',
+    url: 'https://cdn.example/video.mp4',
+    duration: 158,
+    variants: [{ url: 'https://cdn.example/video.mp4' }],
+  });
+
+  const result = reconcilePlayerEvidence([mse], fetchable);
+
+  assert.equal(result.items[0].thumbnail, undefined);
+  assert.equal(result.items[0].duration, 158);
+});
+
 test('an MSE observation cannot replace an existing structured variant authority', () => {
   const authority = item({
     id: 'fetchable',
@@ -61,6 +82,39 @@ test('an MSE observation cannot replace an existing structured variant authority
 
   assert.equal(result.consumed, true);
   assert.deepEqual(result.items, [authority]);
+});
+
+test('presentation metadata updates only the explicitly resolved media item', () => {
+  const first = item({ id: 'first', thumbnail: 'data:image/jpeg;base64,old-first' });
+  const second = item({ id: 'second', thumbnail: 'data:image/jpeg;base64,old-second' });
+
+  const updated = applyPresentationMetadata([first, second], 'second', {
+    thumbnail: 'data:image/jpeg;base64,current-poster',
+    duration: 158,
+  });
+
+  assert.equal(updated?.[0], first);
+  assert.equal(updated?.[0].thumbnail, 'data:image/jpeg;base64,old-first');
+  assert.equal(updated?.[1].thumbnail, 'data:image/jpeg;base64,current-poster');
+  assert.equal(updated?.[1].duration, 158);
+});
+
+test('presentation metadata never guesses when the resolved media item is absent', () => {
+  const first = item({ id: 'first' });
+  const second = item({ id: 'second' });
+
+  assert.equal(
+    applyPresentationMetadata([first, second], 'missing', { thumbnail: 'data:image/jpeg;base64,poster' }),
+    undefined,
+  );
+});
+
+test('an unavailable authoritative poster clears stale thumbnail evidence', () => {
+  const media = item({ id: 'target', thumbnail: 'data:image/jpeg;base64,stale' });
+
+  const updated = applyPresentationMetadata([media], 'target', { thumbnail: null });
+
+  assert.equal(updated?.[0].thumbnail, undefined);
 });
 
 test('progressive fMP4 evidence grows the variant set without regressing on stale observations', () => {

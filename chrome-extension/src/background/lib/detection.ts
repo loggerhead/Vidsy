@@ -1,4 +1,5 @@
 import {
+  applyPresentationMetadata,
   isVariantAuthority,
   reconcilePlayerEvidence,
   sameMainPlayerSession,
@@ -347,6 +348,7 @@ const updateBadge = (tabId: number, count: number) => {
 const TAB_WRITE_DEBOUNCE_MS = 500;
 const pendingTabItems = new Map<string, MediaItem[]>();
 const tabWriteTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const presentationThumbnailRequests = new Map<string, string | null>();
 
 const flushTabItems = async (tabKey: string) => {
   const items = pendingTabItems.get(tabKey);
@@ -378,6 +380,39 @@ const getTabItems = async (tabKey: string): Promise<MediaItem[]> => {
 const setTabItems = (tabKey: string, items: MediaItem[]) => {
   pendingTabItems.set(tabKey, items);
   scheduleTabWrite(tabKey);
+};
+
+const updatePresentationMetadata = async (
+  itemId: string,
+  metadata: { thumbnailUrl: string | null; duration?: number },
+  tabId: number,
+): Promise<boolean> => {
+  const requestKey = `${tabId}:${itemId}`;
+  presentationThumbnailRequests.set(requestKey, metadata.thumbnailUrl);
+  const thumbnail = metadata.thumbnailUrl ? await fetchThumbnailAsDataUrl(metadata.thumbnailUrl) : undefined;
+  if (presentationThumbnailRequests.get(requestKey) !== metadata.thumbnailUrl) return false;
+  const duration =
+    metadata.duration !== undefined && Number.isFinite(metadata.duration) && metadata.duration > 0
+      ? metadata.duration
+      : undefined;
+  if (duration === undefined && metadata.thumbnailUrl === null) {
+    const tabKey = String(tabId);
+    const current = await getTabItems(tabKey);
+    const updated = applyPresentationMetadata(current, itemId, { thumbnail: null });
+    if (!updated) return false;
+    setTabItems(tabKey, updated);
+    return true;
+  }
+
+  const tabKey = String(tabId);
+  const current = await getTabItems(tabKey);
+  const updated = applyPresentationMetadata(current, itemId, {
+    thumbnail: thumbnail ?? null,
+    ...(duration !== undefined ? { duration } : {}),
+  });
+  if (!updated) return false;
+  setTabItems(tabKey, updated);
+  return true;
 };
 
 const normalizeDetection = (candidate: Partial<MediaItem>, tabId?: number, pageUrl?: string): MediaItem => {
@@ -649,50 +684,14 @@ export const upsertDetection = async (
     return;
   }
 
-  // Once a real stream (HLS/DASH/MSS) exists for this tab, treat any further
-  // video/audio/MSE detections as player-side noise and suppress them — the
-  // manifest is the downloadable artifact, individual segments and the
-  // MediaSource shell are not. Before dropping the candidate, salvage any
-  // duration/thumbnail it carries and patch them onto the manifest item:
-  // the MSE candidate from the iframe's <video> element knows el.duration,
-  // which the network-side HLS detection has no way to learn on its own.
+  // Once a real stream exists, element/MSE observations are player-side
+  // evidence rather than additional downloadable artifacts. Presentation
+  // metadata reaches the exact item through PRESENTATION_METADATA after the
+  // player-facing resolver has established ownership.
   if (
     (candidate.kind === 'video' || candidate.kind === 'audio' || candidate.kind === 'mse') &&
     current.some(item => item.kind === 'hls' || item.kind === 'dash' || item.kind === 'mss')
   ) {
-    // Only the MSE candidate is a trustworthy source of main-player metadata:
-    // its <video> element is bound to the same MediaSource that the manifest
-    // feeds. Plain HTTP video candidates here would be ads/pre-rolls living
-    // inside the player frame — patching their duration onto the manifest
-    // would mislabel the runtime.
-    //
-    // Duration overwrites unconditionally: the executeScript probe at HLS-
-    // insert time often samples while a pre-roll ad is still playing and
-    // writes the ad's 30s duration onto the manifest. The MSE candidate
-    // fires after the main MediaSource is bound and its duration settles,
-    // so it always reflects the real content and should win.
-    //
-    // Thumbnail only fills if missing: the page's og:image (captured by the
-    // executeScript probe in the top frame) is almost always a better
-    // representation than a captured video frame, which can be black during
-    // an ad→main transition or a generic player poster.
-    if (candidate.kind === 'mse' && (candidate.duration || candidate.thumbnail)) {
-      const manifestIdx = current.findIndex(item => item.kind === 'hls' || item.kind === 'dash' || item.kind === 'mss');
-      if (manifestIdx !== -1) {
-        const manifest = current[manifestIdx];
-        const patch: Partial<MediaItem> = {};
-        if (candidate.duration && candidate.duration !== manifest.duration) {
-          patch.duration = candidate.duration;
-        }
-        if (candidate.thumbnail && !manifest.thumbnail) {
-          patch.thumbnail = candidate.thumbnail;
-        }
-        if (Object.keys(patch).length > 0) {
-          const updated = current.map((it, i) => (i === manifestIdx ? { ...it, ...patch } : it));
-          setTabItems(tabKey, updated);
-        }
-      }
-    }
     return;
   }
 
@@ -753,14 +752,12 @@ export const upsertDetection = async (
 
   if (tabId !== undefined) {
     updateBadge(tabId, updatedList.length);
-    // Grab title, duration, and thumbnail from the tab via scripting.
-    // `allFrames: true` is required because many players (JWPlayer-in-iframe,
-    // YouTube, etc.) keep the actual <video> element inside a sub-frame —
-    // the top frame has the title/og:image but no playable element, so its
-    // duration probe always returns null. We scan every frame and merge.
+    // Grab page-level title from the tab via scripting. Player duration and
+    // thumbnail are intentionally excluded: page metadata cannot identify a
+    // presentation on multi-player documents.
     chrome.scripting
       .executeScript({
-        target: { tabId, allFrames: true },
+        target: { tabId },
         func: () => {
           // ─── Title (priority: JSON-LD > og:title > document.title with suffix stripped) ───
           let title: string | null = null;
@@ -798,69 +795,15 @@ export const upsertDetection = async (
             }
           }
 
-          // ─── Thumbnail (priority: JSON-LD > og:image > twitter:image) ───
-          let thumbnail: string | null = null;
-          for (const s of Array.from(ldScripts)) {
-            try {
-              const d = JSON.parse(s.textContent ?? '');
-              const t = d?.thumbnailUrl || d?.thumbnail?.url || d?.image;
-              if (t && typeof t === 'string') {
-                thumbnail = t;
-                break;
-              }
-              if (Array.isArray(d?.thumbnailUrl) && d.thumbnailUrl[0]) {
-                thumbnail = d.thumbnailUrl[0];
-                break;
-              }
-            } catch {
-              /* ignore */
-            }
-          }
-          if (!thumbnail)
-            thumbnail = document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content ?? null;
-          if (!thumbnail)
-            thumbnail = document.querySelector<HTMLMetaElement>('meta[name="twitter:image"]')?.content ?? null;
-
-          // ─── Duration (meta tags > largest visible video element) ───
-          const durMeta =
-            document.querySelector<HTMLMetaElement>('meta[property="video:duration"]')?.content ??
-            document.querySelector<HTMLMetaElement>('meta[property="og:video:duration"]')?.content ??
-            document.querySelector<HTMLMetaElement>('meta[itemprop="duration"]')?.content ??
-            null;
-          const videoDur = Array.from(document.querySelectorAll<HTMLVideoElement>('video'))
-            .filter(v => {
-              const r = v.getBoundingClientRect();
-              return r.width > 200 && r.height > 150;
-            })
-            .map(v => v.duration)
-            .filter(d => isFinite(d) && d > 0)
-            .reduce((a, b) => Math.max(a, b), 0);
-          const duration = durMeta ? parseFloat(durMeta) || null : videoDur > 0 ? videoDur : null;
-
-          return { thumbnail, title, duration };
+          return { title };
         },
       })
       .then(results => {
         if (!results || results.length === 0) return;
-        // Merge across frames: prefer the top frame (frameId === 0) for title
-        // and thumbnail since page metadata lives there, but accept duration
-        // from whichever frame has a playable element. Sub-frame results
-        // backfill anything the top frame couldn't supply.
+        // Page title belongs to the top-level document.
         const top = results.find(r => r.frameId === 0)?.result ?? null;
-        const merged: { title: string | null; thumbnail: string | null; duration: number | null } = {
-          title: top?.title ?? null,
-          thumbnail: top?.thumbnail ?? null,
-          duration: top?.duration ?? null,
-        };
-        for (const r of results) {
-          const v = r?.result;
-          if (!v) continue;
-          if (!merged.title && v.title) merged.title = v.title;
-          if (!merged.thumbnail && v.thumbnail) merged.thumbnail = v.thumbnail;
-          if (!merged.duration && v.duration) merged.duration = v.duration;
-        }
+        const merged = { title: top?.title ?? null };
         const patch: Parameters<typeof upsertDetection>[0] = { url: normalized.url };
-        if (merged.thumbnail && !normalized.thumbnail) patch.thumbnail = merged.thumbnail;
         // Update title if we have a better one — current title may be just a hostname
         if (merged.title) {
           const decoded = htmlDecode(merged.title);
@@ -868,7 +811,6 @@ export const upsertDetection = async (
             patch.title = decoded;
           }
         }
-        if (merged.duration && !normalized.duration) patch.duration = merged.duration;
         if (Object.keys(patch).length > 1) void upsertDetection(patch, tabId, undefined, generation);
       })
       .catch(() => undefined);
@@ -883,6 +825,9 @@ export const clearTabDetections = async (tabId: number) => {
     tabWriteTimers.delete(tabKey);
   }
   pendingTabItems.delete(tabKey);
+  for (const key of presentationThumbnailRequests.keys()) {
+    if (key.startsWith(`${tabId}:`)) presentationThumbnailRequests.delete(key);
+  }
   const state = await mediaDetectionsStorage.get();
   if (state[tabKey]) {
     const next = { ...state };
@@ -1089,4 +1034,4 @@ export const setMainVideoPresent = (tabId: number, present: boolean) => {
 
 export const hasMainVideo = (tabId: number) => tabsWithMainVideo.has(tabId);
 
-export { configureDetectionTabLifecycle };
+export { configureDetectionTabLifecycle, updatePresentationMetadata };

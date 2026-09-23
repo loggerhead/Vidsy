@@ -29,9 +29,10 @@ const evidence = (id: string) => ({
 test('multiple videos with identical qualities yield only the current asset and its audio', () => {
   const items = ['100', '200', '300'].map(item);
   for (const id of ['100', '300', '200']) {
-    const primary = resolvePlayerMedia(items, evidence(id));
-    assert.equal(primary?.id, id);
-    const rows = buildRows([primary!]);
+    const resolution = resolvePlayerMedia(items, evidence(id));
+    assert.equal(resolution?.item.id, id);
+    assert.equal(resolution?.authority, 'poster');
+    const rows = buildRows([resolution!.item]);
     assert.equal(rows.length, 3);
     for (const row of rows) {
       const request = buildDownloadMessage(row.item, row.variant, 1, true);
@@ -52,9 +53,12 @@ test('direct and child playlist sources resolve without provider-specific assump
     url: 'https://cdn.example/master.m3u8',
     hlsChildUrls: ['https://other.example/child.m3u8'],
   };
-  assert.equal(resolvePlayerMedia([target, item('200')], { ...evidence('200'), sourceUrls: [target.url] }), target);
   assert.equal(
-    resolvePlayerMedia([target, item('200')], { ...evidence('200'), sourceUrls: target.hlsChildUrls }),
+    resolvePlayerMedia([target, item('200')], { ...evidence('200'), sourceUrls: [target.url] })?.item,
+    target,
+  );
+  assert.equal(
+    resolvePlayerMedia([target, item('200')], { ...evidence('200'), sourceUrls: target.hlsChildUrls })?.item,
     target,
   );
   assert.equal(
@@ -65,9 +69,10 @@ test('direct and child playlist sources resolve without provider-specific assump
 
 test('single-player pages retain a unique same-page presentation; multiple candidates remain unresolved', () => {
   const player = { sourceUrls: ['blob:local'], posterUrl: '', pageUrl, playerCount: 1 };
-  assert.equal(resolvePlayerMedia([item('100')], player)?.id, '100');
+  assert.equal(resolvePlayerMedia([item('100')], player)?.item.id, '100');
+  assert.equal(resolvePlayerMedia([item('100')], player)?.authority, 'unique-presentation');
   assert.equal(resolvePlayerMedia([item('100'), item('200')], player), undefined);
-  assert.equal(resolvePlayerMedia([item('100')], { ...player, pageUrl: 'https://example.com/other' })?.id, '100');
+  assert.equal(resolvePlayerMedia([item('100')], { ...player, pageUrl: 'https://example.com/other' })?.item.id, '100');
   assert.equal(resolvePlayerMedia([item('100')], { ...player, playerCount: 2 }), undefined);
 });
 
@@ -83,7 +88,7 @@ test('cross-origin iframe player can use the tab-level unique presentation fallb
       posterUrl: '',
       pageUrl: 'https://iframe-player.example/embed/124114844020371',
       playerCount: 1,
-    }),
+    })?.item,
     detectedInTopTab,
   );
 });
@@ -107,7 +112,7 @@ test('ext_tw_video poster IDs are matched exactly and untrusted lookalike hosts 
     resolvePlayerMedia([target], {
       ...evidence('123'),
       posterUrl: 'https://pbs.twimg.com/ext_tw_video_thumb/123/pu/img/cover.jpg',
-    }),
+    })?.item,
     target,
   );
   assert.equal(

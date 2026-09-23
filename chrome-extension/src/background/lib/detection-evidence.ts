@@ -24,14 +24,34 @@ const selectRicherVariants = (
   incoming: MediaVariant[] | undefined,
 ): MediaVariant[] | undefined => ((incoming?.length ?? 0) > (existing?.length ?? 0) ? incoming : existing);
 
+type PresentationMetadata = { thumbnail?: string | null; duration?: number };
+
+// Presentation metadata is allowed to mutate only the MediaItem already
+// resolved by the player-facing authority. The background never guesses an
+// owner from list position, page URL, or arrival order.
+const applyPresentationMetadata = (
+  items: MediaItem[],
+  itemId: string,
+  metadata: PresentationMetadata,
+): MediaItem[] | undefined => {
+  const index = items.findIndex(item => item.id === itemId);
+  if (index === -1) return undefined;
+  const patch: Pick<MediaItem, 'thumbnail' | 'duration'> = {};
+  if (metadata.thumbnail !== undefined) patch.thumbnail = metadata.thumbnail ?? undefined;
+  if (metadata.duration !== undefined) patch.duration = metadata.duration;
+  const updated = [...items];
+  updated[index] = { ...updated[index], ...patch };
+  return updated;
+};
+
 const combineMseAndFetchable = (mse: MediaItem, fetchable: MediaItem): MediaItem => ({
   ...mse,
   ...fetchable,
   id: mse.id,
   title: mse.title ?? fetchable.title,
   fileName: deriveFileName(fetchable.url, mse.title ?? fetchable.title),
-  thumbnail: mse.thumbnail ?? fetchable.thumbnail,
-  duration: mse.duration ?? fetchable.duration,
+  thumbnail: fetchable.thumbnail,
+  duration: fetchable.duration,
   detectedAt: Math.min(mse.detectedAt, fetchable.detectedAt),
 });
 
@@ -61,7 +81,13 @@ const reconcilePlayerEvidence = (
   };
 };
 
-export { isVariantAuthority, reconcilePlayerEvidence, sameMainPlayerSession, selectRicherVariants };
+export {
+  applyPresentationMetadata,
+  isVariantAuthority,
+  reconcilePlayerEvidence,
+  sameMainPlayerSession,
+  selectRicherVariants,
+};
 
 // A master owns only the exact child playlists it declares, including unused
 // language/bitrate renditions. Do not infer ownership from directories or tabs.

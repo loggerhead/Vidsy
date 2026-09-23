@@ -165,54 +165,6 @@ const getPageTitle = (): string => {
   return htmlDecode(title || document.title);
 };
 
-// ─── Thumbnail extraction ───
-const MAX_THUMB_W = 320;
-
-const captureVideoThumbnail = (el: HTMLVideoElement): string | undefined => {
-  try {
-    if (!el.videoWidth || !el.videoHeight || el.readyState < 2) return undefined;
-    // Skip cross-origin videos (canvas taint)
-    const scale = Math.min(1, MAX_THUMB_W / el.videoWidth);
-    const w = Math.round(el.videoWidth * scale);
-    const h = Math.round(el.videoHeight * scale);
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return undefined;
-    ctx.drawImage(el, 0, 0, w, h);
-    return canvas.toDataURL('image/jpeg', 0.7);
-  } catch {
-    // Cross-origin taint or security error
-    return undefined;
-  }
-};
-
-const getPageThumbnail = (): string | undefined => {
-  // 1. JSON-LD thumbnailUrl
-  const ldScripts = document.querySelectorAll<HTMLScriptElement>('script[type="application/ld+json"]');
-  for (const script of Array.from(ldScripts)) {
-    try {
-      const data = JSON.parse(script.textContent ?? '');
-      const thumb = data?.thumbnailUrl || data?.thumbnail?.url || data?.image;
-      if (thumb && typeof thumb === 'string') return thumb;
-      if (Array.isArray(data?.thumbnailUrl) && data.thumbnailUrl[0]) return data.thumbnailUrl[0];
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // 2. og:image
-  const og = document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content;
-  if (og) return og;
-
-  // 3. twitter:image
-  const tw = document.querySelector<HTMLMetaElement>('meta[name="twitter:image"]')?.content;
-  if (tw) return tw;
-
-  return undefined;
-};
-
 // ─── Duration extraction ───
 const getPageDuration = (): number | undefined => {
   // From meta tags
@@ -318,10 +270,6 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
   }
 
   const duration = el && isFinite(el.duration) && el.duration > 0 ? el.duration : (getPageDuration() ?? undefined);
-  const poster = isVideo && (el as HTMLVideoElement).poster ? (el as HTMLVideoElement).poster : undefined;
-  const thumbnail = isVideo
-    ? (captureVideoThumbnail(el as HTMLVideoElement) ?? poster ?? getPageThumbnail())
-    : getPageThumbnail();
   const videoEl = isVideo ? (el as HTMLVideoElement) : undefined;
   // Only trust the live element's resolution for the URL it is actually
   // rendering. Other source URLs (e.g. alt-quality <source> tags) need their
@@ -338,8 +286,10 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
     kind: candidate.kind,
     source: 'element' as const,
     title: getPageTitle(),
-    duration,
-    thumbnail,
+    // An MSE URL identifies only a document-local MediaSource, not a specific
+    // downloadable presentation. Player metadata is published by the content
+    // UI only after that player resolves to one exact MediaItem id.
+    duration: candidate.kind === 'mse' ? undefined : duration,
     resolution,
   };
 
@@ -355,7 +305,7 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
 
   // If already sent, only resend if we now have richer data
   if (sentUrls.has(candidate.url)) {
-    if (thumbnail || duration || resolution) {
+    if (duration || resolution) {
       chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.DETECTED, payload }).catch(() => undefined);
     }
     return;
