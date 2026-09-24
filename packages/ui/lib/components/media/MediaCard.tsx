@@ -93,13 +93,7 @@ export const MediaCard = ({
   ]);
   // Download submission and progress storage share the stable media item id.
   const progress = downloads[item.id];
-  const locallyBusy = downloadState.busyUrl === item.id;
-  const isBusy = locallyBusy || (progress != null && ACTIVE_STAGES.has(progress.stage));
-  // The enqueue response can arrive before the first storage progress update.
-  // Render immediately instead of falling back to the Download button during
-  // that gap; the real entry replaces this placeholder on the next update.
-  const displayProgress =
-    progress ?? (locallyBusy ? { key: item.id, stage: 'init' as const, downloadedBytes: 0 } : undefined);
+  const isBusy = downloadState.busyUrl === item.id || (progress != null && ACTIVE_STAGES.has(progress.stage));
   const isComplete = progress?.stage === 'success' && progress.downloadId;
 
   const selectedVariantUrl = selectedVariants[item.id];
@@ -266,10 +260,10 @@ export const MediaCard = ({
                 <IconFolder /> Show in Folder
               </button>
             </div>
-          ) : isBusy && displayProgress ? (
+          ) : isBusy && progress ? (
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
-                <DownloadProgress progress={displayProgress} isLight={isLight} />
+                <DownloadProgress progress={progress} isLight={isLight} />
               </div>
               <button
                 className={cn(

@@ -72,7 +72,7 @@ export const startBackground = (): void => {
   configureHeaderCaptureTabFilter(tabId => tabWork.isCapturing(tabId));
   const initialTabCaptureReady = chrome.tabs
     .query({ active: true, currentWindow: true })
-    .then(([tab]) => (tab?.id === undefined ? undefined : tabWork.activate(tab.id, tab.status === 'complete', tab.url)))
+    .then(([tab]) => (tab?.id === undefined ? undefined : tabWork.track(tab.id, tab.status === 'complete', tab.url)))
     .then(() => undefined)
     .catch(() => undefined);
   const admitNetworkResponse = createNetworkCaptureAdmission({
@@ -80,22 +80,12 @@ export const startBackground = (): void => {
     prepareCapture: async tabId => {
       try {
         const tab = await chrome.tabs.get(tabId);
-        await tabWork.prepareCapture(tabId, tab.status === 'loading', tab.url, tab.active);
+        await tabWork.prepareCapture(tabId, tab.status === 'loading', tab.url);
       } catch {
         // The tab disappeared before the response could be attributed.
       }
     },
     isCapturing: tabId => tabWork.isCapturing(tabId),
-    ensureCapturing: async tabId => {
-      try {
-        const tab = await chrome.tabs.get(tabId);
-        if (!tab.active) return false;
-        await tabWork.activate(tabId, tab.status === 'complete', tab.url);
-        return tabWork.isCapturing(tabId);
-      } catch {
-        return false;
-      }
-    },
     handle: handleNetworkDetection,
   });
 
@@ -446,7 +436,7 @@ export const startBackground = (): void => {
   chrome.tabs.onActivated.addListener(({ tabId }) => {
     void chrome.tabs
       .get(tabId)
-      .then(tab => tabWork.activate(tabId, tab.status === 'complete', tab.url))
+      .then(tab => tabWork.track(tabId, tab.status === 'complete', tab.url))
       .catch(() => undefined);
   });
   // ─── Context menu ───

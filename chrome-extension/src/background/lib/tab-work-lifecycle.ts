@@ -11,7 +11,7 @@ type TabWorkLifecycleOptions = {
 
 type TabRecord = {
   generation: number;
-  active: boolean;
+  tracked: boolean;
   documentUrl?: string;
   initialNavigationPending: boolean;
   navigationInProgress: boolean;
@@ -29,7 +29,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
     if (!record) {
       record = {
         generation: 0,
-        active: false,
+        tracked: false,
         initialNavigationPending: false,
         navigationInProgress: false,
         restartWhenReady: false,
@@ -73,7 +73,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
       if (pageUrl) record.documentUrl = pageUrl;
       return;
     }
-    const mustRestart = Boolean(record.controller) || record.active;
+    const mustRestart = Boolean(record.controller) || record.tracked;
     record.navigationInProgress = true;
     record.generation += 1;
     record.restartWhenReady = mustRestart;
@@ -89,9 +89,9 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
   };
 
   return {
-    async activate(tabId: number, pageReady: boolean, pageUrl?: string) {
+    async track(tabId: number, pageReady: boolean, pageUrl?: string) {
       const record = recordFor(tabId);
-      record.active = true;
+      record.tracked = true;
       if (pageUrl) record.documentUrl = pageUrl;
       if (!pageReady && !record.controller) record.initialNavigationPending = true;
       if (pageReady) await startCurrent(tabId, record);
@@ -106,14 +106,13 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
      * the lifecycle from the tab's loading state before detection reads a
      * generation, while keeping repeated response admission idempotent.
      */
-    async prepareCapture(tabId: number, pageLoading: boolean, pageUrl?: string, pageActive = false) {
+    async prepareCapture(tabId: number, pageLoading: boolean, pageUrl?: string) {
       const record = recordFor(tabId);
-      // Admission may inspect responses from any tab. Only Chrome's current
-      // active-tab fact may establish capture; seeing a response is not proof
-      // that the tab belongs to this lifecycle.
-      if (!record.active) {
-        if (!pageActive) return;
-        record.active = true;
+      // A response attributed by Chrome to a live tab is sufficient evidence
+      // that its document belongs to the detection lifecycle. Browser focus is
+      // presentation state and must not decide whether media can be captured.
+      if (!record.tracked) {
+        record.tracked = true;
         record.initialNavigationPending = pageLoading;
         if (pageUrl) record.documentUrl = pageUrl;
         // A fast document can reach `complete` before either activation or the
@@ -128,7 +127,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
 
     async pageReady(tabId: number) {
       const record = recordFor(tabId);
-      if (!record.active && !record.restartWhenReady) return;
+      if (!record.tracked && !record.restartWhenReady) return;
       await record.captureReady;
       record.navigationInProgress = false;
       record.restartWhenReady = false;
@@ -139,7 +138,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
     async close(tabId: number) {
       const record = records.get(tabId);
       if (!record) return;
-      record.active = false;
+      record.tracked = false;
       record.generation += 1;
       await stopCurrent(tabId, record);
       records.delete(tabId);
@@ -153,20 +152,20 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
     // readiness. A navigation's initial media request is valid immediately;
     // content scripts still wait until the replacement document is ready.
     isCapturing(tabId: number) {
-      return records.get(tabId)?.active === true;
+      return records.get(tabId)?.tracked === true;
     },
 
     generationForCapture(tabId: number): number | undefined {
       const record = records.get(tabId);
-      return record?.active ? record.generation : undefined;
+      return record?.tracked ? record.generation : undefined;
     },
 
     async waitForCapture(tabId: number, generation: number): Promise<boolean> {
       const record = records.get(tabId);
-      if (!record || !record.active || record.generation !== generation) return false;
+      if (!record || !record.tracked || record.generation !== generation) return false;
       await record.captureReady;
       const current = records.get(tabId);
-      return current?.active === true && current.generation === generation;
+      return current?.tracked === true && current.generation === generation;
     },
 
     generationForRunning(tabId: number): number | undefined {
@@ -176,7 +175,7 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
 
     isCurrent(tabId: number, generation: number) {
       const record = records.get(tabId);
-      return record?.generation === generation && record.active;
+      return record?.generation === generation && record.tracked;
     },
   };
 };
