@@ -62,11 +62,13 @@ const reconcilePlayerEvidence = (
   if (incoming.kind !== 'mse' && !isFetchablePlayerAuthority(incoming)) return { items, consumed: false };
 
   const incomingIsMse = incoming.kind === 'mse';
-  const counterpartIndex = items.findIndex(item => {
-    if (!sameMainPlayerSession(item, incoming)) return false;
-    return incomingIsMse ? isFetchablePlayerAuthority(item) : item.kind === 'mse';
+  const counterpartIndexes = items.flatMap((item, index) => {
+    if (!sameMainPlayerSession(item, incoming)) return [];
+    const matches = incomingIsMse ? isFetchablePlayerAuthority(item) : item.kind === 'mse';
+    return matches ? [index] : [];
   });
-  if (counterpartIndex === -1) return { items, consumed: false };
+  if (counterpartIndexes.length !== 1) return { items, consumed: false };
+  const counterpartIndex = counterpartIndexes[0];
 
   const counterpart = items[counterpartIndex];
   if (incomingIsMse && isVariantAuthority(counterpart)) {

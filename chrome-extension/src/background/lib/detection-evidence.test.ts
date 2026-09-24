@@ -84,6 +84,21 @@ test('an MSE observation cannot replace an existing structured variant authority
   assert.deepEqual(result.items, [authority]);
 });
 
+test('fetchable evidence does not guess between multiple MSE players on one page', () => {
+  const first = item({ id: 'mse-1', url: 'mse:https://example.com/feed#vidsy-player=1', kind: 'mse' });
+  const second = item({ id: 'mse-2', url: 'mse:https://example.com/feed#vidsy-player=2', kind: 'mse' });
+  const fetchable = item({
+    id: 'fetchable',
+    url: 'https://cdn.example/video.mp4',
+    variants: [{ url: 'https://cdn.example/video.mp4' }],
+  });
+
+  const result = reconcilePlayerEvidence([first, second], fetchable);
+
+  assert.equal(result.consumed, false);
+  assert.deepEqual(result.items, [first, second]);
+});
+
 test('presentation metadata updates only the explicitly resolved media item', () => {
   const first = item({ id: 'first', thumbnail: 'data:image/jpeg;base64,old-first' });
   const second = item({ id: 'second', thumbnail: 'data:image/jpeg;base64,old-second' });

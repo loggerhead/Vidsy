@@ -164,21 +164,24 @@ const parseTrack = (bytes: Uint8Array, trakStart: number, trakEnd: number): Fmp4
   };
 };
 
-const parseFmp4InitSegment = (buffer: ArrayBuffer): Fmp4TrackInfo | null => {
+const parseFmp4Tracks = (buffer: ArrayBuffer): Fmp4TrackInfo[] => {
   const bytes = new Uint8Array(buffer);
   const moov = findChild(bytes, 0, bytes.length, 'moov');
-  if (!moov) return null;
+  if (!moov) return [];
+  const tracks: Fmp4TrackInfo[] = [];
   for (let off = moov.start; off + 8 <= moov.end; ) {
     const box = boxEnd(bytes, off, moov.end);
     if (!box) break;
     if (box.type === 'trak') {
       const track = parseTrack(bytes, box.start, box.end);
-      if (track) return track;
+      if (track) tracks.push(track);
     }
     off = box.end;
   }
-  return null;
+  return tracks;
 };
+
+const parseFmp4InitSegment = (buffer: ArrayBuffer): Fmp4TrackInfo | null => parseFmp4Tracks(buffer)[0] ?? null;
 
 const fetchInitSegment = async (
   url: string,
@@ -247,7 +250,7 @@ const audioSort = (a: Fmp4Stream, b: Fmp4Stream): number => {
 const buildCandidate = (group: Fmp4Group): (Partial<MediaItem> & { url: string }) | undefined => {
   const videos = [...group.videos.values()].sort(videoSort);
   const audios = [...group.audios.values()].sort(audioSort);
-  if (videos.length === 0 || audios.length === 0) return undefined;
+  if (videos.length === 0) return undefined;
 
   const audio = audios[0];
   const variants: MediaVariant[] = videos.map(video => ({
@@ -255,8 +258,8 @@ const buildCandidate = (group: Fmp4Group): (Partial<MediaItem> & { url: string }
     codecs: video.codecs,
     resolution: video.resolution,
     contentLength: video.contentLength,
-    audioUrl: audio.url,
-    audioMimeType: audio.mimeType,
+    audioUrl: audio?.url,
+    audioMimeType: audio?.mimeType,
   }));
   const primary = videos[0];
 
@@ -269,8 +272,8 @@ const buildCandidate = (group: Fmp4Group): (Partial<MediaItem> & { url: string }
     contentLength: primary.contentLength,
     resolution: primary.resolution,
     variants,
-    audioUrl: audio.url,
-    audioMimeType: audio.mimeType,
+    audioUrl: audio?.url,
+    audioMimeType: audio?.mimeType,
     detectedAt: Math.min(...videos.map(v => v.detectedAt), ...audios.map(a => a.detectedAt)),
   };
 };
@@ -310,10 +313,39 @@ const handleFmp4RangeDetection = async (args: {
 
   const dnrKey = `fmp4-probe:${args.tabId ?? 'unknown'}:${crypto.randomUUID?.() ?? Math.random().toString(36)}`;
   const initSegment = await fetchInitSegment(args.url, byteRange, args.requestHeaders, dnrKey);
-  if (!initSegment) return { handled: true };
+  if (!initSegment) {
+    probedUrls.delete(args.url);
+    return { handled: false };
+  }
 
-  const track = parseFmp4InitSegment(initSegment);
-  if (!track) return { handled: true };
+  const tracks = parseFmp4Tracks(initSegment);
+  if (tracks.length === 0) {
+    probedUrls.delete(args.url);
+    return { handled: false };
+  }
+  const videoTrack = tracks.find(track => track.kind === 'video');
+  const audioTrack = tracks.find(track => track.kind === 'audio');
+
+  // A file containing both track kinds is a complete media authority. It is
+  // not a fragment waiting to be paired with another URL.
+  if (videoTrack && audioTrack) {
+    return {
+      handled: true,
+      candidate: {
+        url: args.url,
+        kind: 'video',
+        mimeType: 'video/mp4',
+        source: 'network',
+        title: args.title,
+        contentLength: byteRange.total,
+        resolution:
+          videoTrack.width && videoTrack.height ? { width: videoTrack.width, height: videoTrack.height } : undefined,
+        detectedAt: Date.now(),
+      },
+    };
+  }
+
+  const track = tracks[0];
 
   const groups = groupsByTab.get(tabKey) ?? new Map<string, Fmp4Group>();
   if (!groupsByTab.has(tabKey)) groupsByTab.set(tabKey, groups);

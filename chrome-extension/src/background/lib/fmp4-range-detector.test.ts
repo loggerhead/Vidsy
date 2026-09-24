@@ -30,6 +30,20 @@ const initSegment = (handler: 'vide' | 'soun', codec: string, width = 0, height 
   return bytes.buffer;
 };
 
+const muxedInitSegment = (): ArrayBuffer => {
+  const videoTrack = box('trak', [
+    ...tkhd(1280, 720),
+    ...box('mdia', [...hdlr('vide'), ...box('minf', [...box('stbl', [...stsd('avc1')])])]),
+  ]);
+  const audioTrack = box('trak', [
+    ...box('mdia', [...hdlr('soun'), ...box('minf', [...box('stbl', [...stsd('mp4a')])])]),
+  ]);
+  return new Uint8Array([
+    ...box('ftyp', [...ascii('isom'), 0, 0, 0, 0]),
+    ...box('moov', [...videoTrack, ...audioTrack]),
+  ]).buffer;
+};
+
 test('parseFmp4InitSegment detects a video track with codec and resolution', () => {
   assert.deepEqual(parseFmp4InitSegment(initSegment('vide', 'avc1', 1920, 1080)), {
     kind: 'video',
@@ -80,6 +94,51 @@ test('clearing a tab also clears its probed URL identity for the next document',
   }
 });
 
+test('a ranged video track is emitted without waiting for a separate audio URL', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(initSegment('vide', 'avc1', 1280, 720), {
+      status: 206,
+      headers: { 'content-type': 'video/mp4' },
+    });
+
+  try {
+    const result = await handleFmp4RangeDetection({
+      url: 'https://cdn.example/asset/video.mp4',
+      tabId: 45,
+      responseHeaders: [{ name: 'Content-Range', value: 'bytes 0-4095/1000000' }],
+      mimeType: 'video/mp4',
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(result.candidate?.url, 'https://cdn.example/asset/video.mp4');
+    assert.equal(result.candidate?.kind, 'video');
+    assert.equal(result.candidate?.audioUrl, undefined);
+  } finally {
+    clearFmp4RangeDetectionsForTab(45);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('an unreadable range response remains unclaimed by the fMP4 detector', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 403 });
+
+  try {
+    const result = await handleFmp4RangeDetection({
+      url: 'https://cdn.example/media/video.mp4',
+      tabId: 46,
+      responseHeaders: [{ name: 'Content-Range', value: 'bytes 0-4095/1000000' }],
+      mimeType: 'video/mp4',
+    });
+
+    assert.deepEqual(result, { handled: false });
+  } finally {
+    clearFmp4RangeDetectionsForTab(46);
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('parsed fMP4 track kind overrides generic CDN content types', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async input => {
@@ -108,6 +167,30 @@ test('parsed fMP4 track kind overrides generic CDN content types', async () => {
     assert.equal(result.candidate?.variants?.[0]?.codecs, 'av01');
   } finally {
     clearFmp4RangeDetectionsForTab(43);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a self-contained ranged MP4 is immediately authoritative', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(muxedInitSegment(), { status: 206, headers: { 'content-type': 'video/mp4' } });
+
+  try {
+    const result = await handleFmp4RangeDetection({
+      url: 'https://cdn.example/media/complete.mp4',
+      tabId: 44,
+      responseHeaders: [{ name: 'Content-Range', value: 'bytes 0-4095/2000000' }],
+      mimeType: 'video/mp4',
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(result.candidate?.url, 'https://cdn.example/media/complete.mp4');
+    assert.equal(result.candidate?.kind, 'video');
+    assert.deepEqual(result.candidate?.resolution, { width: 1280, height: 720 });
+    assert.equal(result.candidate?.audioUrl, undefined);
+  } finally {
+    clearFmp4RangeDetectionsForTab(44);
     globalThis.fetch = originalFetch;
   }
 });

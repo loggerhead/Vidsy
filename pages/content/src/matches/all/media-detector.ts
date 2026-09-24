@@ -1,3 +1,4 @@
+import { DeferredMediaSendScheduler } from './media-send-scheduler';
 import { createLogger, MEDIA_MESSAGE, stripTitleSuffix } from '@extension/shared';
 import type { MediaKind } from '@extension/shared';
 
@@ -103,34 +104,16 @@ const deriveKindFromElement = (el: HTMLMediaElement, url: string): MediaKind => 
   return el.tagName.toLowerCase() === 'audio' ? 'audio' : 'video';
 };
 
-// ─── Main-video filtering ───
-// Skip hover-preview videos and only detect the primary player.
-// Hover previews are typically: small, short duration, or one of many videos on listing pages.
+// ─── Playable-video filtering ───
+// Each rendered player owns its own media evidence. Size and visibility reject
+// hover previews without guessing that one element is authoritative for the page.
 
-const isMainVideo = (el: HTMLVideoElement): boolean => {
+const isPlayableVideo = (el: HTMLVideoElement): boolean => {
   const rect = el.getBoundingClientRect();
   // Must be visible
   const style = window.getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
   if (rect.width === 0 || rect.height === 0) return false;
-
-  // On pages with multiple video elements, only accept the largest one
-  // (the main player is always the biggest; hover previews are smaller cards)
-  const allVideos = Array.from(document.querySelectorAll<HTMLVideoElement>('video')).filter(v => {
-    const r = v.getBoundingClientRect();
-    const s = window.getComputedStyle(v);
-    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
-  });
-
-  if (allVideos.length > 1) {
-    // Find the largest video by area
-    const largest = allVideos.reduce((best, v) => {
-      const r = v.getBoundingClientRect();
-      const bestR = best.getBoundingClientRect();
-      return r.width * r.height > bestR.width * bestR.height ? v : best;
-    });
-    if (el !== largest) return false;
-  }
 
   // Minimum size threshold (very small videos are never the main player)
   if (rect.width < 300 || rect.height < 200) return false;
@@ -264,7 +247,7 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
   const isVideo = el instanceof HTMLVideoElement;
 
   // Main-video filter: skip tiny hover previews
-  if (isVideo && !isMainVideo(el as HTMLVideoElement)) {
+  if (isVideo && !isPlayableVideo(el as HTMLVideoElement)) {
     contentLog('candidate.drop.non_main_video', { url: contentUrl(candidate.url) });
     return;
   }
@@ -333,7 +316,7 @@ const sendCandidate = (candidate: { url: string; mimeType?: string; kind?: Media
 // HLS/DASH/MSS landed. If nothing else shows up after the delay the MSE
 // badge still appears, just slightly later.
 const MSE_DEFER_MS = 3000;
-let mseDeferTimer: ReturnType<typeof setTimeout> | undefined;
+const mseSendScheduler = new DeferredMediaSendScheduler<HTMLMediaElement>(MSE_DEFER_MS);
 const scheduleMseSend = (url: string, el: HTMLMediaElement) => {
   // Once the initial deferred send has fired, downstream loadedmetadata /
   // durationchange events should propagate immediately (sendCandidate has its
@@ -344,18 +327,10 @@ const scheduleMseSend = (url: string, el: HTMLMediaElement) => {
     sendCandidate({ url, kind: 'mse' }, el);
     return;
   }
-  if (mseDeferTimer) clearTimeout(mseDeferTimer);
-  mseDeferTimer = setTimeout(() => {
-    mseDeferTimer = undefined;
+  mseSendScheduler.schedule(el, () => {
     if (!detectorActive) return;
     sendCandidate({ url, kind: 'mse' }, el);
-  }, MSE_DEFER_MS);
-};
-const cancelMseSend = () => {
-  if (mseDeferTimer) {
-    clearTimeout(mseDeferTimer);
-    mseDeferTimer = undefined;
-  }
+  });
 };
 
 const collectFromElement = (el: HTMLMediaElement) => {
@@ -387,14 +362,15 @@ const collectFromElement = (el: HTMLMediaElement) => {
     // direct srcObject) and we can't fetch it. Register an MSE label so the
     // UI shows the media instead of silently dropping it. The download action
     // is blocked downstream.
-    scheduleMseSend(`mse:${window.location.href}`, el);
+    const playerId = mseSendScheduler.identity(el);
+    scheduleMseSend(`mse:${window.location.href}#vidsy-player=${playerId}`, el);
     return;
   }
 
   // A real (non-blob) source exists on this element — cancel any pending
   // MSE send. This catches the JWPlayer-style case where the blob URL was
   // attached first and a probe-able URL appears later.
-  cancelMseSend();
+  mseSendScheduler.cancel(el);
 
   urls.forEach(url => {
     const kind = deriveKindFromElement(el, url);
@@ -477,7 +453,7 @@ export const initMediaDetector = (): (() => void) => {
     observer.disconnect();
     window.removeEventListener('resize', scanMainVideoPresence);
     window.removeEventListener('pagehide', onPageHide);
-    cancelMseSend();
+    mseSendScheduler.cancelAll();
     for (const [element, handler] of registeredElements) {
       ['loadedmetadata', 'canplay', 'play', 'durationchange', 'timeupdate'].forEach(event => {
         element.removeEventListener(event, handler);
