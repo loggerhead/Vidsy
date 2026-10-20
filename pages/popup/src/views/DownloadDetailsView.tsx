@@ -4,9 +4,7 @@
 // what the download interceptor uses for its standalone progress window).
 // Auto-focuses on the most recent active download.
 //
-// NOT yet shown: per-connection breakdown rendering the byte-range layout of
-// each parallel connection. That needs the offscreen worker to report per-
-// chunk progress — currently we only get aggregate bytes.
+// Range downloads include the live per-connection breakdown reported by the worker.
 
 import { MEDIA_MESSAGE, formatSpeed, useStorage } from '@extension/shared';
 import { mediaSettingsStorage } from '@extension/storage';
@@ -81,7 +79,7 @@ const readDlKey = (): string | null => {
 };
 
 export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
-  const dlKey = useMemo(() => readDlKey(), []);
+  const [dlKey, setDlKey] = useState(readDlKey);
   const entry = useMemo(() => {
     if (dlKey) return downloads[dlKey] ?? null;
     return pickFocusedDownload(downloads);
@@ -163,30 +161,36 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
 
   const onPause = () => {
     if (!entry) return;
-    void chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { url: entry.key, intent: 'pause' } });
+    void chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { key: entry.key, intent: 'pause' } });
   };
   const onCancel = () => {
     if (!entry) return;
-    void chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { url: entry.key, intent: 'cancel' } });
+    void chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CANCEL, payload: { key: entry.key, intent: 'cancel' } });
   };
-  // Resume / Retry sends the same DOWNLOAD message the browser-action popup's
-  // onRetry sends — a full restart from byte 0, not a true byte-level resume.
-  // (Real byte-level resume is a separate task: needs OPFS state persistence +
-  // chunk-completion tracking + Range continuation from first incomplete chunk.)
   const onResume = () => {
     if (!entry?.item) return;
-    void chrome.runtime.sendMessage({
-      type: MEDIA_MESSAGE.DOWNLOAD,
-      payload: {
-        url: entry.item.url,
-        key: entry.item.url,
-        kind: entry.item.kind,
-        fileName: entry.item.fileName,
-        title: entry.item.title,
-        outputFormat: entry.outputFormat,
-        item: entry.item,
-      },
-    });
+    if (entry.stage === 'paused' || entry.stage === 'failed') {
+      void chrome.runtime.sendMessage({
+        type: MEDIA_MESSAGE.CONTROL,
+        payload: { key: entry.key, intent: entry.stage === 'paused' ? 'resume' : 'retry' },
+      });
+      return;
+    }
+    const requestKey = crypto.randomUUID();
+    void chrome.runtime
+      .sendMessage({
+        type: MEDIA_MESSAGE.CONTROL,
+        payload: { key: entry.key, intent: 'again', requestId: requestKey },
+      })
+      .then(response => {
+        if (!response?.ok) return;
+        const key = response.key ?? requestKey;
+        setDlKey(key);
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set('dlKey', key);
+        window.history.replaceState(window.history.state, '', nextUrl);
+      })
+      .catch(() => undefined);
   };
   const onCloseWindow = () => window.close();
 
@@ -221,7 +225,7 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
   const isMuxing = entry.stage === 'mux' || entry.stage === 'finalize';
   const eta = speed > 0 && totalBytes > downloadedBytes ? (totalBytes - downloadedBytes) / speed : undefined;
   const isHttpDirect = entry.item?.kind === 'video' || entry.item?.kind === 'audio';
-  const resumeCapability = isHttpDirect ? 'Yes (Range)' : 'During mux only';
+  const resumeCapability = isHttpDirect ? 'When supported' : 'Restart only';
   const transferLabel =
     entry.transferMode === 'range'
       ? `Parallel Range${entry.connectionLimit ? ` · up to ${entry.connectionLimit}` : ''}`

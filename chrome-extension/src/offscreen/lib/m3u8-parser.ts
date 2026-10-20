@@ -6,6 +6,7 @@ export type HlsKeyInfo = {
 
 export type HlsSegmentInfo = {
   url: string;
+  range?: { start: number; end: number };
   keyInfo?: HlsKeyInfo;
   sequenceNumber: number;
 };
@@ -13,6 +14,7 @@ export type HlsSegmentInfo = {
 export type HlsPlaylistResult = {
   segments: HlsSegmentInfo[];
   mapUrl?: string;
+  mapRange?: { start: number; end: number };
 };
 
 export const parseM3u8Attributes = (raw: string): Record<string, string> => {
@@ -57,6 +59,18 @@ export const parseHlsPlaylist = (manifestText: string, baseUrl: string): HlsPlay
   let mediaSequence = 0;
   let segIndex = 0;
   let mapUrl: string | undefined;
+  let mapRange: HlsSegmentInfo['range'];
+  let pendingRange: string | undefined;
+  let previous: HlsSegmentInfo | undefined;
+  const parseRange = (raw: string, priorEnd?: number): NonNullable<HlsSegmentInfo['range']> => {
+    const match = raw.match(/^(\d+)(?:@(\d+))?$/);
+    const length = Number(match?.[1]);
+    const start = match?.[2] === undefined ? (priorEnd === undefined ? NaN : priorEnd + 1) : Number(match[2]);
+    const end = start + length - 1;
+    if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(end) || length <= 0)
+      throw new Error('Invalid HLS byte range or missing prior range offset');
+    return { start, end };
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -68,9 +82,18 @@ export const parseHlsPlaylist = (manifestText: string, baseUrl: string): HlsPlay
     if (line.startsWith('#EXT-X-MAP:')) {
       const attrs = parseM3u8Attributes(line.slice('#EXT-X-MAP:'.length));
       if (attrs['URI']) {
-        mapUrl = new URL(attrs['URI'], baseUrl).toString();
+        const url = new URL(attrs['URI'], baseUrl).toString();
+        const range = attrs['BYTERANGE']
+          ? parseRange(attrs['BYTERANGE'], url === mapUrl ? mapRange?.end : undefined)
+          : undefined;
+        if (mapUrl && (url !== mapUrl || JSON.stringify(range) !== JSON.stringify(mapRange)))
+          throw new Error('HLS initialization changes require a separate processing period');
+        mapUrl = url;
+        mapRange = range;
       }
     }
+
+    if (line.startsWith('#EXT-X-BYTERANGE:')) pendingRange = line.slice('#EXT-X-BYTERANGE:'.length);
 
     if (line.startsWith('#EXT-X-KEY:')) {
       const attrs = parseM3u8Attributes(line.slice('#EXT-X-KEY:'.length));
@@ -89,16 +112,23 @@ export const parseHlsPlaylist = (manifestText: string, baseUrl: string): HlsPlay
     }
 
     if (line && !line.startsWith('#')) {
-      segments.push({
-        url: new URL(line, baseUrl).toString(),
+      const url = new URL(line, baseUrl).toString();
+      const range = pendingRange
+        ? parseRange(pendingRange, previous?.url === url ? previous.range?.end : undefined)
+        : undefined;
+      previous = {
+        url,
+        ...(range ? { range } : {}),
         keyInfo: currentKey?.method === 'AES-128' ? { ...currentKey } : undefined,
         sequenceNumber: mediaSequence + segIndex,
-      });
+      };
+      segments.push(previous);
+      pendingRange = undefined;
       segIndex++;
     }
   }
 
-  return { segments, mapUrl };
+  return { segments, mapUrl, mapRange };
 };
 
 // Master playlists own the relationship between variants and renditions.

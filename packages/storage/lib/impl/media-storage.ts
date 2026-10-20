@@ -67,6 +67,7 @@ type MediaDownloadProgress = {
   outputFormat?: 'mp4' | 'mp3';
   startedAt?: number;
   updatedAt?: number;
+  revision?: number;
   chunks?: Array<{
     i: number;
     start: number;

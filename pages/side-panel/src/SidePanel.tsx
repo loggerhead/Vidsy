@@ -2,7 +2,7 @@ import { PanelHeader } from './components/PanelHeader';
 import { SkeletonFallback, ErrorFallback } from './components/SkeletonFallback';
 import { useMediaPage } from './hooks/useMediaPage';
 import { withErrorBoundary, withSuspense, mediaBadgeLabel, formatDate } from '@extension/shared';
-import { mediaSettingsStorage, mediaHistoryStorage, exampleThemeStorage } from '@extension/storage';
+import { mediaSettingsStorage, exampleThemeStorage } from '@extension/storage';
 import {
   cn,
   BottomBar,
@@ -196,7 +196,9 @@ const SidePanel = () => {
           action={
             history.length > 0 ? (
               <button
-                onClick={() => mediaHistoryStorage.set([])}
+                onClick={() => {
+                  void chrome.runtime.sendMessage({ type: 'media/clear-history' });
+                }}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-[11px] font-medium transition',
                   isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10',

@@ -33,3 +33,8 @@ chrome-extension/public/ffmpeg/ffmpeg-core.worker.js
 
 # compiled
 **/tailwind-output.css
+midscene_run/
+.e2e-downloads/
+
+# Reproducible media test fixtures and outputs
+.media-test/

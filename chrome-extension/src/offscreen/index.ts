@@ -1,12 +1,15 @@
 import 'webextension-polyfill';
 import { cleanupBlob } from './lib/blob-cleanup';
 import { downloadDashMuxed } from './lib/dash-download';
+import { createExecutionRegistry } from './lib/execution-registry';
 import { downloadHlsMuxed } from './lib/hls-download';
-import { downloadHttpDirect } from './lib/http-download';
-import { downloadMerged } from './lib/merged-download';
+import { downloadHttpDirect, discardHttpResume } from './lib/http-download';
+import { downloadMerged, discardMergedResume } from './lib/merged-download';
 import { purgeOpfsOrphans } from './lib/opfs-gc';
-import { activeAbortControllers } from './lib/segment-fetcher';
+import { setExecutionProgressReporter } from './lib/progress';
+import { activeAbortControllers, downloadStopIntents } from './lib/segment-fetcher';
 import { pingDownloadWorker } from './lib/worker-client';
+import { isHlsKind, isDashKind } from '../background/lib/media-utils';
 import { createLogger } from '@extension/shared';
 
 const log = createLogger('offscreen');
@@ -20,11 +23,32 @@ export const startOffscreen = (): void => {
   if (started) return;
   started = true;
 
-  void purgeOpfsOrphans().then(({ removed, failed }) => {
+  const storageReady = purgeOpfsOrphans().then(({ removed, failed }) => {
     if (removed > 0 || failed > 0) {
       log.info('opfs.gc_completed', { removed, failed });
     }
   });
+
+  const executions = createExecutionRegistry({
+    execute: async command => {
+      await storageReady;
+      const { url, kind, fileName, outputFormat, headers, audioUrl, audioMimeType, item } = command.execution;
+      const key = command.requestId;
+      if (downloadStopIntents.has(key)) throw new Error('Download cancelled');
+      if (isHlsKind(kind, url))
+        return downloadHlsMuxed(url, fileName ?? 'download', outputFormat, key, headers, audioUrl);
+      if (isDashKind(kind, url)) return downloadDashMuxed(url, fileName ?? 'download', outputFormat, key, headers);
+      if (audioUrl && outputFormat !== 'mp3')
+        return downloadMerged(url, audioUrl, item?.mimeType, audioMimeType, key, headers);
+      return downloadHttpDirect(url, key, outputFormat, headers);
+    },
+    stop: async (command, intent) => {
+      downloadStopIntents.set(command.requestId, intent);
+      activeAbortControllers.get(command.requestId)?.abort();
+    },
+    publish: report => chrome.runtime.sendMessage({ type: 'offscreen/execution-event', payload: report }),
+  });
+  setExecutionProgressReporter((key, progress) => executions.progress(key, progress));
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     log.debug('message.received', {
@@ -33,21 +57,48 @@ export const startOffscreen = (): void => {
       url: message.payload?.url,
       kind: message.payload?.kind,
     });
+    if (message.type === 'offscreen/executions') {
+      sendResponse({ ok: true, records: executions.inventory() });
+      return;
+    }
+    if (message.type === 'offscreen/start-execution') {
+      try {
+        executions.start(message.payload.command);
+        sendResponse({
+          ok: true,
+          report: executions
+            .inventory()
+            .find(record => record.command.executionId === message.payload.command.executionId)?.report,
+        });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error) });
+      }
+      return;
+    }
+    if (message.type === 'offscreen/stop-execution') {
+      const known = executions.inventory().some(record => record.command.executionId === message.payload.executionId);
+      void (
+        known
+          ? executions.stop(message.payload.executionId, message.payload.intent)
+          : message.payload.intent === 'cancel'
+            ? Promise.all([
+                discardHttpResume(message.payload.requestId),
+                discardMergedResume(message.payload.requestId),
+              ])
+            : Promise.resolve()
+      ).then(() => sendResponse({ ok: true }));
+      return true;
+    }
+    if (message.type === 'offscreen/forget-execution') {
+      const record = executions.inventory().find(record => record.command.executionId === message.payload.executionId);
+      if (record) downloadStopIntents.delete(record.command.requestId);
+      executions.forget(message.payload.executionId);
+      sendResponse({ ok: true });
+      return;
+    }
     if (message.type === 'offscreen/cleanup-blob') {
       void cleanupBlob(message.payload.blobUrl).finally(() => sendResponse({ ok: true }));
       return true;
-    }
-
-    if (message.type === 'offscreen/cancel') {
-      const { key } = message.payload;
-      const controller = activeAbortControllers.get(key);
-      if (controller) {
-        controller.abort();
-        activeAbortControllers.delete(key);
-      }
-      log.debug('cancel', { key, hadController: Boolean(controller) });
-      sendResponse({ ok: true });
-      return;
     }
 
     // Readiness probe for the production-package smoke test. This exercises
@@ -60,42 +111,6 @@ export const startOffscreen = (): void => {
       return true;
     }
 
-    if (message.type === 'offscreen/download-blob') {
-      const { kind, url, fileName, output, key, headers, audioUrl, videoMimeType, audioMimeType } = message.payload;
-      const handle = (
-        p: ReturnType<
-          typeof downloadHlsMuxed | typeof downloadDashMuxed | typeof downloadMerged | typeof downloadHttpDirect
-        >,
-      ) =>
-        p
-          .then(result => {
-            log.debug('download.success', { key, kind, result });
-            sendResponse({ ok: true, ...result });
-          })
-          .catch(err => {
-            log.error('download.failed', { key, kind, error: err });
-            sendResponse({ ok: false, error: String(err) });
-          });
-
-      log.debug('download.started', {
-        key,
-        kind,
-        url,
-        audioUrl: audioUrl ? '[present]' : undefined,
-        fileName,
-      });
-
-      if (kind === 'hls') {
-        handle(downloadHlsMuxed(url, fileName, output, key, headers, audioUrl));
-      } else if (kind === 'dash') {
-        handle(downloadDashMuxed(url, fileName, output, key, headers));
-      } else if (kind === 'merged') {
-        handle(downloadMerged(url, audioUrl, videoMimeType, audioMimeType, key, headers));
-      } else if (kind === 'http') {
-        handle(downloadHttpDirect(url, key, output, headers));
-      }
-      return true;
-    }
     return false;
   });
 };

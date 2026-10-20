@@ -1,9 +1,10 @@
 import type { MediaDownloadProgress } from '@extension/shared';
 
-export const updateProgress = async (key: string, prog: Partial<MediaDownloadProgress>) => {
-  await chrome.runtime.sendMessage({ type: 'offscreen/progress', payload: { key, prog } }).catch(() => undefined);
+let reportExecutionProgress: ((key: string, progress: Partial<MediaDownloadProgress>) => boolean) | undefined;
+export const setExecutionProgressReporter = (report: NonNullable<typeof reportExecutionProgress>) => {
+  reportExecutionProgress = report;
 };
 
-export const clearProgress = async (key: string) => {
-  await chrome.runtime.sendMessage({ type: 'offscreen/clear', payload: { key } }).catch(() => undefined);
+export const updateProgress = async (key: string, prog: Partial<MediaDownloadProgress>) => {
+  reportExecutionProgress?.(key, prog);
 };

@@ -29,13 +29,20 @@ export class OpfsWritableMap {
     return this.root;
   }
 
-  async open(name: string): Promise<void> {
-    if (this.entries.has(name)) return;
+  async open(name: string, preserve = false): Promise<void> {
+    if (this.entries.has(name)) {
+      if (!preserve) this.truncate(name, 0);
+      return;
+    }
     const root = await this.getRoot();
     const handle = (await root.getFileHandle(name, { create: true })) as FileSystemFileHandleWithSync;
     const sync = await handle.createSyncAccessHandle();
-    sync.truncate(0);
-    this.entries.set(name, { handle, sync, size: 0 });
+    if (!preserve) sync.truncate(0);
+    this.entries.set(name, { handle, sync, size: preserve ? sync.getSize() : 0 });
+  }
+
+  flush(name: string): void {
+    this.entries.get(name)?.sync.flush();
   }
 
   writeAt(name: string, pos: number, chunk: Uint8Array | ArrayBuffer): number {
@@ -56,6 +63,19 @@ export class OpfsWritableMap {
     const entry = this.entries.get(name);
     if (!entry) throw new Error(`OPFS entry not open: ${name}`);
     return this.writeAt(name, entry.size, chunk);
+  }
+
+  copyAppend(source: string, destination: string): void {
+    const entry = this.entries.get(source);
+    if (!entry) throw new Error(`OPFS entry not open: ${source}`);
+    const buffer = new Uint8Array(Math.min(1024 * 1024, entry.size));
+    let offset = 0;
+    while (offset < entry.size) {
+      const read = entry.sync.read(buffer.subarray(0, Math.min(buffer.length, entry.size - offset)), { at: offset });
+      if (read <= 0) throw new Error('OPFS read stalled');
+      this.append(destination, buffer.subarray(0, read));
+      offset += read;
+    }
   }
 
   truncate(name: string, newSize: number): void {

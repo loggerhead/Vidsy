@@ -1,3 +1,4 @@
+import { headersForFetch } from './hls-request';
 import { parseHlsPlaylist } from './m3u8-parser';
 import { normalizeCodec, tracksFromCodecString } from './media-processing';
 import type { MediaCodec, MediaContainer, MediaDescriptor, MediaTrack } from './media-processing';
@@ -144,17 +145,45 @@ const fetchBoundedProbe = async (
   url: string,
   headers?: Record<string, string>,
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
+  range?: { start: number; end: number },
 ): Promise<Uint8Array> => {
+  const start = range?.start ?? 0;
+  const end = Math.min(range?.end ?? PROBE_BYTES - 1, start + PROBE_BYTES - 1);
   const response = await fetchImpl(url, {
-    headers: { ...headers, Range: `bytes=0-${PROBE_BYTES - 1}` },
+    headers: { ...headersForFetch(headers, url), Range: `bytes=${start}-${end}` },
     credentials: 'include',
-    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)])
+      : AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });
   if (!response.ok && response.status !== 206) throw new Error(`Media probe failed with HTTP ${response.status}`);
   const contentLength = Number(response.headers.get('content-length') ?? '0');
-  if (contentLength > PROBE_BYTES) throw new Error(`Media probe exceeded ${PROBE_BYTES} bytes`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > PROBE_BYTES) throw new Error(`Media probe exceeded ${PROBE_BYTES} bytes`);
+  if (contentLength > PROBE_BYTES) {
+    await response.body?.cancel();
+    throw new Error(`Media probe exceeded ${PROBE_BYTES} bytes`);
+  }
+  if (!response.body) throw new Error('Media probe returned no body');
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < PROBE_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const part = value.slice(0, PROBE_BYTES - size);
+      parts.push(part);
+      size += part.byteLength;
+    }
+  } finally {
+    await reader.cancel();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
   return bytes;
 };
 
@@ -172,13 +201,22 @@ const describeHls = async (args: {
   headers?: Record<string, string>;
   durationSeconds?: number;
   fetchImpl?: typeof fetch;
+  authorizeUrl?: (url: string) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<MediaDescriptor> => {
   const parsed = parseHlsPlaylist(args.manifestText, args.manifestUrl);
   const declaredTracks = tracksFromCodecString(args.declaredCodecs, 'manifest');
   const probeUrl = parsed.mapUrl ?? parsed.segments[0]?.url;
   let probe = { container: 'unknown' as MediaContainer, tracks: [] as MediaTrack[], hasInitializationSegment: false };
   if (probeUrl) {
-    const bytes = await fetchBoundedProbe(probeUrl, args.headers, args.fetchImpl);
+    await args.authorizeUrl?.(probeUrl);
+    const bytes = await fetchBoundedProbe(
+      probeUrl,
+      args.headers,
+      args.fetchImpl,
+      args.signal,
+      parsed.mapUrl ? parsed.mapRange : parsed.segments[0]?.range,
+    );
     probe = probeMediaBytes(bytes);
   }
   return {

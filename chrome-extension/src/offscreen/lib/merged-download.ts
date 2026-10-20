@@ -1,18 +1,16 @@
-import { downloadUrlToOpfs } from './http-download';
 import { errorInfo, flowLog, safeUrl } from './download-log';
+import { downloadUrlToOpfs } from './http-download';
 import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
 import { describeDirectFile, mergeTrackDescriptors } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
+import { opfsJobName } from './opfs-job-name';
 import { prepareOutputDelivery } from './output-delivery';
 import { updateProgress } from './progress';
-import { activeAbortControllers } from './segment-fetcher';
+import { activeAbortControllers, downloadStopIntents } from './segment-fetcher';
 import { cancelWorkerJob, getOpfsFile, readMaxConnections, removeOpfs } from './worker-client';
 import type { DownloadTransport } from './http-download';
 import type { ProgressUpdate } from '../download_worker/messages';
-
-const opfsNameFor = (key: string, tag: string, ext: string): string =>
-  `merged-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}-${tag}-${Date.now().toString(36)}${ext}`;
 
 type TrackProgress = {
   downloadedBytes: number;
@@ -51,8 +49,8 @@ export const downloadMerged = async (
   activeAbortControllers.set(key, abortController);
   abortController.signal.addEventListener('abort', () => cancelWorkerJob(key));
 
-  const videoOpfsName = opfsNameFor(key, 'video', '.bin');
-  const audioOpfsName = opfsNameFor(key, 'audio', '.bin');
+  const videoOpfsName = await opfsJobName('merged', key, 'video', '.bin');
+  const audioOpfsName = await opfsJobName('merged', key, 'audio', '.bin');
   let outputOpfsName: string | null = null;
   let videoBlobUrl: string | null = null;
   let audioBlobUrl: string | null = null;
@@ -217,7 +215,7 @@ export const downloadMerged = async (
     if (plan.type === 'passthrough' || plan.type === 'concatenate-fmp4') {
       throw new Error(`Unexpected ${plan.type} plan for separate media tracks`);
     }
-    outputOpfsName = opfsNameFor(key, 'out', plan.output.extension);
+    outputOpfsName = await opfsJobName('merged', key, 'out', plan.output.extension);
     await preflightDiskSpace(totalInputBytes);
 
     const videoJs = await jsfetchInputForOpfs(videoOpfsName);
@@ -237,8 +235,8 @@ export const downloadMerged = async (
     URL.revokeObjectURL(audioBlobUrl);
     videoBlobUrl = null;
     audioBlobUrl = null;
-    void removeOpfs(videoOpfsName).catch(() => undefined);
-    void removeOpfs(audioOpfsName).catch(() => undefined);
+    await removeOpfs(videoOpfsName).catch(() => undefined);
+    await removeOpfs(audioOpfsName).catch(() => undefined);
 
     const outputFile = await getOpfsFile(outputOpfsName);
     const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
@@ -260,9 +258,11 @@ export const downloadMerged = async (
         /* ignore */
       }
     }
-    void removeOpfs(videoOpfsName).catch(() => undefined);
-    void removeOpfs(audioOpfsName).catch(() => undefined);
-    if (outputOpfsName) void removeOpfs(outputOpfsName).catch(() => undefined);
+    if (downloadStopIntents.get(key) !== 'pause') {
+      await removeOpfs(videoOpfsName).catch(() => undefined);
+      await removeOpfs(audioOpfsName).catch(() => undefined);
+    }
+    if (outputOpfsName) await removeOpfs(outputOpfsName).catch(() => undefined);
     throw err;
   } finally {
     activeAbortControllers.delete(key);
@@ -270,4 +270,8 @@ export const downloadMerged = async (
       await updateProgress(key, { stage: 'cancelled', downloadedBytes: 0 });
     }
   }
+};
+
+export const discardMergedResume = async (key: string): Promise<void> => {
+  await Promise.all(['video', 'audio'].map(async tag => removeOpfs(await opfsJobName('merged', key, tag, '.bin'))));
 };

@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
-const fixtureRoot = process.env.VIDSY_MEDIA_FIXTURES ?? '/tmp/vidsy-web-media-remux/fixtures-full';
+const fixtureRoot =
+  process.env.VIDSY_MEDIA_FIXTURES ?? path.resolve(import.meta.dirname, '../../../../.media-test/fixtures');
 const fixture = async (name: string): Promise<Uint8Array> =>
   new Uint8Array(await readFile(path.join(fixtureRoot, name)));
 
@@ -124,4 +125,32 @@ test('HLS descriptor rejects probe bodies above the fixed byte budget', async ()
     }),
     /exceeded 262144 bytes/,
   );
+});
+
+test('unknown-length media probes cancel at the byte budget without buffering the full response', async () => {
+  let cancelled = false;
+  let pulls = 0;
+  await describeHls({
+    manifestText: '#EXTM3U\n#EXTINF:2,\nsegment.ts\n',
+    manifestUrl: 'https://fixture.invalid/p.m3u8',
+    fetchImpl: async () => {
+      const response = new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulls++;
+            controller.enqueue(new Uint8Array(64 * 1024));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      );
+      response.arrayBuffer = async () => {
+        throw new Error('Unbounded response buffering');
+      };
+      return response;
+    },
+  });
+  assert.equal(cancelled, true);
+  assert.ok(pulls <= 5, 'probe consumes only its prefix plus the stream high-water mark');
 });

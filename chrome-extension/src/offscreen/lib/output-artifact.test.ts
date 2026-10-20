@@ -1,10 +1,11 @@
 import { validateOutputArtifact } from './output-artifact';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import type { ExecutableMuxPlan } from './media-processing';
 
-const smokeRoot = process.env.VIDSY_MEDIA_SMOKE ?? '/tmp/vidsy-web-media-remux/smoke';
+const smokeRoot = process.env.VIDSY_MEDIA_SMOKE ?? path.resolve(import.meta.dirname, '../../../../.media-test/outputs');
 
 const fixtureFile = async (name: string): Promise<File> => {
   const bytes = await readFile(`${smokeRoot}/${name}`);

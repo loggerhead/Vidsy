@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
     "prettier": "prettier . --write --ignore-path ../.prettierignore",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "pretest": "node ../tools/media-remux/prepare-test-media.mjs"
   },
   "dependencies": {
     "@extension/env": "workspace:*",

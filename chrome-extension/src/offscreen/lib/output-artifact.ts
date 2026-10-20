@@ -122,6 +122,7 @@ const probeMp4 = async (file: Blob): Promise<ProbeResult> => {
   let offset = 0;
   let moovBytes: Uint8Array | undefined;
   let sawMediaData = false;
+  let fragmentSeconds = 0;
   while (offset < file.size) {
     const boxHeader = await readBytes(file, offset, Math.min(16, file.size - offset));
     if (boxHeader.byteLength < 8) throw new Error('Output MP4 ends with a truncated box header');
@@ -137,6 +138,8 @@ const probeMp4 = async (file: Blob): Promise<ProbeResult> => {
       throw new Error(`Output MP4 has an invalid ${type || 'unknown'} box`);
     }
     if (type === 'moov') moovBytes = await readBytes(file, offset, size);
+    if (type === 'moof' && moovBytes)
+      fragmentSeconds = Math.max(fragmentSeconds, fragmentedDuration(await readBytes(file, offset, size), moovBytes));
     if (type === 'mdat') sawMediaData = true;
     offset += size;
   }
@@ -149,7 +152,57 @@ const probeMp4 = async (file: Blob): Promise<ProbeResult> => {
     .filter(box => box.type === 'trak')
     .map(box => mp4Track(moovBytes, box))
     .filter((track): track is OutputTrack => Boolean(track));
-  return { container: 'mp4', tracks, durationSeconds: mp4Duration(moovBytes, moov) };
+  return { container: 'mp4', tracks, durationSeconds: mp4Duration(moovBytes, moov) || fragmentSeconds || undefined };
+};
+
+// Fragmented MP4 init segments normally have a zero mvhd duration. Verify the
+// actual decode timeline instead of rejecting correctly concatenated fragments.
+const fragmentedDuration = (bytes: Uint8Array, movie: Uint8Array): number => {
+  const moov = mp4Boxes(movie).find(box => box.type === 'moov')!;
+  const tracks = new Map<number, number>();
+  for (const track of mp4Boxes(movie, moov.headerSize, moov.size).filter(box => box.type === 'trak')) {
+    const tkhd = childBox(movie, track, 'tkhd');
+    const mdia = childBox(movie, track, 'mdia');
+    const mdhd = mdia && childBox(movie, mdia, 'mdhd');
+    if (!tkhd || !mdhd) continue;
+    const id = tkhd.start + tkhd.headerSize;
+    const media = mdhd.start + mdhd.headerSize;
+    tracks.set(u32(movie, id + (movie[id] === 1 ? 20 : 12)), u32(movie, media + (movie[media] === 1 ? 20 : 12)));
+  }
+  const moof = mp4Boxes(bytes).find(box => box.type === 'moof');
+  if (!moof) return 0;
+  let seconds = 0;
+  for (const traf of mp4Boxes(bytes, moof.headerSize, moof.size).filter(box => box.type === 'traf')) {
+    const tfhd = childBox(bytes, traf, 'tfhd');
+    const tfdt = childBox(bytes, traf, 'tfdt');
+    if (!tfhd || !tfdt) continue;
+    const header = tfhd.start + tfhd.headerSize;
+    const flags = u32(bytes, header) & 0xffffff;
+    const id = u32(bytes, header + 4);
+    let field = header + 8 + (flags & 1 ? 8 : 0) + (flags & 2 ? 4 : 0);
+    const defaultDuration = flags & 8 ? u32(bytes, field) : 0;
+    const decode = tfdt.start + tfdt.headerSize;
+    let duration = bytes[decode] === 1 ? u64(bytes, decode + 4) : u32(bytes, decode + 4);
+    for (const run of mp4Boxes(bytes, traf.start + traf.headerSize, traf.start + traf.size).filter(
+      box => box.type === 'trun',
+    )) {
+      const body = run.start + run.headerSize;
+      const runFlags = u32(bytes, body) & 0xffffff;
+      const count = u32(bytes, body + 4);
+      field = body + 8 + (runFlags & 1 ? 4 : 0) + (runFlags & 4 ? 4 : 0);
+      for (let sample = 0; sample < count; sample++) {
+        duration += runFlags & 0x100 ? u32(bytes, field) : defaultDuration;
+        field +=
+          (runFlags & 0x100 ? 4 : 0) +
+          (runFlags & 0x200 ? 4 : 0) +
+          (runFlags & 0x400 ? 4 : 0) +
+          (runFlags & 0x800 ? 4 : 0);
+      }
+    }
+    const scale = tracks.get(id);
+    if (scale) seconds = Math.max(seconds, duration / scale);
+  }
+  return seconds;
 };
 
 const probeWebm = async (file: Blob): Promise<ProbeResult> => {
@@ -195,7 +248,12 @@ const probeMp3 = async (file: Blob): Promise<ProbeResult> => {
     if (frame) break;
   }
   if (!frame) throw new Error('Output is not a valid MP3 stream');
-  const durationSeconds = ((file.size - offset) * 8) / frame.bitrate;
+  const sideInfo = bytes[offset + 3] >> 6 === 3 ? 17 : 32;
+  const xing = offset + 4 + (bytes[offset + 1] & 1 ? 0 : 2) + sideInfo;
+  const hasFrameCount = ['Xing', 'Info'].includes(ascii(bytes, xing, 4)) && u32(bytes, xing + 4) & 1;
+  const durationSeconds = hasFrameCount
+    ? (u32(bytes, xing + 8) * 1152) / frame.sampleRate
+    : ((file.size - offset) * 8) / frame.bitrate;
   return { container: 'mp3', tracks: [{ type: 'audio', codec: 'mp3' }], durationSeconds };
 };
 

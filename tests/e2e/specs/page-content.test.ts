@@ -1,33 +1,19 @@
-describe('Webextension Content Script', () => {
-  it('should log "example content script loaded" in console on example.com', async () => {
-    await browser.sessionSubscribe({ events: ['log.entryAdded'] });
-    const logs: (string | null)[] = [];
+import { aiAssert, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 
-    browser.on('log.entryAdded', logEntry => {
-      logs.push(logEntry.text);
-    });
+describe('Content script lifecycle', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
 
-    await browser.url('https://example.com');
-
-    const EXPECTED_LOG_MESSAGE = '[CEB] Example content script loaded';
-    await browser.waitUntil(() => logs.includes(EXPECTED_LOG_MESSAGE));
-
-    expect(logs).toContain(EXPECTED_LOG_MESSAGE);
-  });
-
-  it('should log "all content script loaded" in console on any page', async () => {
-    await browser.sessionSubscribe({ events: ['log.entryAdded'] });
-    const logs: (string | null)[] = [];
-
-    browser.on('log.entryAdded', logEntry => {
-      logs.push(logEntry.text);
-    });
-
-    await browser.url('https://www.google.com');
-
-    const EXPECTED_LOG_MESSAGE = '[CEB] All content script loaded';
-    await browser.waitUntil(() => logs.includes(EXPECTED_LOG_MESSAGE));
-
-    expect(logs).toContain(EXPECTED_LOG_MESSAGE);
-  });
+  it('mounts the all-sites content UI and removes it on stop', async () =>
+    withPage(async (page, agent) => {
+      await page.goto('https://example.com');
+      await page.locator('#CEB-extension-all').waitFor();
+      await aiAssert(agent, 'The Vidsy content UI is present on the page');
+      await page.evaluate(() => window.dispatchEvent(new Event('vidsy:stop-content-ui')));
+      await page.locator('#CEB-extension-all').waitFor({ state: 'detached' });
+      expect(await page.locator('#CEB-extension-example').count()).toBe(1);
+      await page.evaluate(() => window.dispatchEvent(new Event('vidsy:start-content-ui')));
+      await page.locator('#CEB-extension-all').waitFor();
+    }));
 });

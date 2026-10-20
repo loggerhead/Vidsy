@@ -112,7 +112,7 @@ export const useMediaPage = () => {
       type: MEDIA_MESSAGE.DOWNLOAD,
       payload: {
         url: chosenUrl,
-        key: item.id,
+        key: crypto.randomUUID(),
         kind: item.kind,
         fileName: item.fileName,
         title: item.title,
@@ -120,7 +120,12 @@ export const useMediaPage = () => {
         outputFormat,
         audioUrl,
         audioMimeType,
-        item,
+        item: {
+          ...item,
+          url: chosenUrl,
+          mimeType: chosenVariant?.mimeType ?? item.mimeType,
+          resolution: chosenVariant?.resolution ?? item.resolution,
+        },
       },
     });
     if (!response?.ok) {
@@ -142,7 +147,17 @@ export const useMediaPage = () => {
 
   const onRetry = async (entry: MediaDownloadProgress) => {
     if (!entry.item) return;
-    await onDownload(entry.item, entry.outputFormat);
+    if (entry.stage === 'paused' || entry.stage === 'failed') {
+      await chrome.runtime.sendMessage({
+        type: MEDIA_MESSAGE.CONTROL,
+        payload: { key: entry.key, intent: entry.stage === 'paused' ? 'resume' : 'retry' },
+      });
+    } else {
+      await chrome.runtime.sendMessage({
+        type: MEDIA_MESSAGE.CONTROL,
+        payload: { key: entry.key, intent: 'again', requestId: crypto.randomUUID() },
+      });
+    }
   };
 
   const onClearDownloads = async (keys?: string[]) => {
@@ -171,7 +186,7 @@ export const useMediaPage = () => {
   const toggleHlsMerge = () =>
     mediaSettingsStorage.set(prev => ({ ...prev, enableHlsMerging: !prev.enableHlsMerging }));
 
-  const clearHistory = () => mediaHistoryStorage.set([]);
+  const clearHistory = () => chrome.runtime.sendMessage({ type: 'media/clear-history' });
 
   // Theme classes
   const bg = isLight ? 'bg-white' : 'bg-[#0f1117]';

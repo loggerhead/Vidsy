@@ -1,4 +1,5 @@
 /* eslint-disable import-x/exports-last */
+import type { MediaItem, MediaKind } from '@extension/shared';
 
 /**
  * Durable lifecycle authority for media downloads.
@@ -25,12 +26,15 @@ export type DownloadPhase = 'idle' | 'fetching' | 'processing' | 'delivering';
 
 export type DownloadExecutionSpec = {
   url: string;
-  kind: string;
+  kind: MediaKind;
   outputFormat: 'mp4' | 'mp3';
   fileName?: string;
   audioUrl?: string;
   audioMimeType?: string;
   headers?: Record<string, string>;
+  audioHeaders?: Record<string, string>;
+  title?: string;
+  item?: MediaItem;
 };
 
 export type DownloadDisplay = {
@@ -73,7 +77,9 @@ export type DownloadJob = {
   };
   terminal?: { reason?: string; downloadId?: number };
   downloadId?: number;
+  artifactReady?: boolean;
   pauseRequested?: boolean;
+  cancelRequested?: boolean;
   createdAt: number;
   updatedAt: number;
   diagnostics: DownloadDiagnostic[];
@@ -108,12 +114,14 @@ export type ExecutorCommand = {
   executionId: string;
   execution: DownloadExecutionSpec;
   display: DownloadDisplay;
+  resumeDelivery?: boolean;
 };
 
 export type ExecutorAdapter = {
   start?: (command: ExecutorCommand) => Promise<void>;
-  cancel?: (identity: ExecutionIdentity & { requestId: string }) => Promise<void>;
+  cancel?: (identity: ExecutionIdentity & { requestId: string; intent: 'pause' | 'cancel' }) => Promise<void>;
   inventory?: () => Promise<ExecutorInventory>;
+  resumeDelivery?: (jobId: string) => Promise<void>;
 };
 
 type ExecutionIdentity = {
@@ -125,6 +133,7 @@ type ExecutionIdentity = {
 export type ExecutorEvent = ExecutionIdentity &
   (
     | { type: 'acknowledged' }
+    | { type: 'ready' }
     | { type: 'progress'; downloadedBytes: number; estimatedBytes?: number; percent?: number; phase?: DownloadPhase }
     | { type: 'artifact'; downloadId: number }
     | { type: 'cancelled' }
@@ -155,6 +164,7 @@ export type DownloadRuntime = {
   submit: (submission: DownloadSubmission) => Promise<{ jobId: string; duplicate: boolean }>;
   command: (jobId: string, command: DownloadCommand) => Promise<boolean>;
   bootstrap: (inventory?: ExecutorInventory) => Promise<RuntimeSnapshot>;
+  schedule: () => Promise<RuntimeSnapshot>;
   executorEvent: (event: ExecutorEvent) => Promise<boolean>;
   browserDelivery: (event: BrowserDeliveryEvent) => Promise<boolean>;
   snapshot: () => Promise<RuntimeSnapshot>;
@@ -166,6 +176,7 @@ type RuntimeOptions = {
   executor?: ExecutorAdapter;
   now?: () => number;
   createExecutionId?: (job: DownloadJob) => string;
+  canStart?: (job: DownloadJob, active: DownloadJob[]) => boolean;
 };
 
 const terminalStates = new Set<DownloadState>(['succeeded', 'failed', 'cancelled', 'paused']);
@@ -178,14 +189,10 @@ const defaultState = (): PersistedRuntime => ({
   jobs: {},
 });
 
-const cloneState = (state: PersistedRuntime): PersistedRuntime => ({
-  ...state,
-  jobs: Object.fromEntries(
-    Object.entries(state.jobs).map(([id, job]) => [id, { ...job, diagnostics: [...job.diagnostics] }]),
-  ),
-});
+const cloneState = (state: PersistedRuntime): PersistedRuntime => structuredClone(state);
 
-const normalizeConcurrency = (value: number): number => Math.max(1, Math.floor(value));
+const normalizeConcurrency = (value: number): number =>
+  Number.isFinite(value) ? Math.max(1, Math.min(8, Math.floor(value))) : 1;
 
 export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime => {
   let operation = Promise.resolve();
@@ -211,7 +218,17 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
   };
 
   const readSnapshot = async (): Promise<RuntimeSnapshot> => {
+    await operation;
     const state = (await options.store.read()) ?? defaultState();
+    const activeIds = new Set(
+      Object.values(state.jobs)
+        .filter(job => activeStates.has(job.state))
+        .map(job => job.executionId),
+    );
+    for (let index = commands.length - 1; index >= 0; index--) {
+      if (!activeIds.has(commands[index].executionId)) commands.splice(index, 1);
+    }
+    for (const id of dispatchedExecutions) if (!activeIds.has(id)) dispatchedExecutions.delete(id);
     const queued = Object.values(state.jobs)
       .filter(job => job.state === 'queued')
       .sort((a, b) => a.queueOrder - b.queueOrder);
@@ -240,8 +257,9 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
   const setState = (job: DownloadJob, state: DownloadState, event: string, reason?: string) => {
     const previous = job.state;
     job.state = state;
-    job.updatedAt = now();
-    addDiagnostic({ ...job, state: previous }, event, state, reason);
+    job.updatedAt = Math.max(now(), job.updatedAt + 1);
+    addDiagnostic(job, event, state, reason);
+    job.diagnostics[job.diagnostics.length - 1].previousState = previous;
   };
 
   const identityMatches = (job: DownloadJob, identity: ExecutionIdentity): boolean =>
@@ -250,27 +268,59 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
     job.executionId === identity.executionId &&
     job.attempt === identity.attempt;
 
-  const schedule = async (state: PersistedRuntime) => {
+  const schedule = async (state: PersistedRuntime): Promise<ExecutorCommand[]> => {
+    const claimedCommands: ExecutorCommand[] = [];
     const configured = typeof options.concurrency === 'function' ? await options.concurrency() : options.concurrency;
     const capacity = normalizeConcurrency(configured);
-    const claimed = Object.values(state.jobs).filter(job => activeStates.has(job.state)).length;
+    const active = Object.values(state.jobs).filter(job => activeStates.has(job.state));
     const eligible = Object.values(state.jobs)
       .filter(job => job.state === 'queued')
       .sort((a, b) => a.queueOrder - b.queueOrder);
-    for (const job of eligible.slice(0, Math.max(0, capacity - claimed))) {
-      job.attempt += 1;
-      job.executionId = nextExecutionId(job);
-      job.phase = 'idle';
-      setState(job, 'starting', 'claim');
+    for (const job of eligible) {
+      if (active.length >= capacity) break;
+      if (options.canStart && !options.canStart(job, active)) continue;
+      const resumeDelivery = Boolean(job.artifactReady && job.executionId);
+      if (!resumeDelivery) {
+        job.attempt += 1;
+        job.executionId = nextExecutionId(job);
+      }
+      job.phase = resumeDelivery ? 'delivering' : 'idle';
+      setState(job, resumeDelivery ? 'finalizing' : 'starting', resumeDelivery ? 'claim-delivery' : 'claim');
       const command: ExecutorCommand = {
         jobId: job.jobId,
         requestId: job.requestId,
         attempt: job.attempt,
-        executionId: job.executionId,
+        executionId: job.executionId!,
         execution: job.execution,
         display: job.display,
+        ...(resumeDelivery ? { resumeDelivery: true } : {}),
       };
       commands.push(command);
+      claimedCommands.push(command);
+      active.push(job);
+    }
+    return claimedCommands;
+  };
+
+  // Dispatch after the claim is committed. A start callback may represent a
+  // long-running executor; it must never hold the scheduler or caller open.
+  const dispatch = (claimed: ExecutorCommand[]) => {
+    for (const command of claimed) {
+      if (
+        command.resumeDelivery
+          ? !options.executor?.resumeDelivery
+          : !options.executor?.start || dispatchedExecutions.has(command.executionId)
+      )
+        continue;
+      if (!command.resumeDelivery) dispatchedExecutions.add(command.executionId);
+      void Promise.resolve()
+        .then(() =>
+          command.resumeDelivery ? options.executor!.resumeDelivery!(command.jobId) : options.executor!.start!(command),
+        )
+        .catch(async error => {
+          await runtime.executorEvent({ ...command, type: 'failed', reason: String(error) });
+          await runtime.schedule();
+        });
     }
   };
 
@@ -285,7 +335,7 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
           jobId,
           requestId: submission.requestId,
           execution: {
-            ...submission.execution,
+            ...structuredClone(submission.execution),
             headers: submission.execution.headers && { ...submission.execution.headers },
           },
           display: { ...submission.display },
@@ -302,8 +352,9 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
         return { jobId, duplicate: false };
       }),
 
-    command: (jobId, command) =>
-      transact(async state => {
+    command: async (jobId, command) => {
+      let stop: Parameters<NonNullable<ExecutorAdapter['cancel']>>[0] | undefined;
+      const result = await transact(async state => {
         const job = state.jobs[jobId];
         if (!job) return false;
         if (command.type === 'clear-terminal') {
@@ -312,28 +363,34 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
           return true;
         }
         if (command.type === 'cancel') {
-          if (terminalStates.has(job.state)) return job.state === 'cancelled';
+          if (terminalStates.has(job.state) && job.state !== 'paused') return job.state === 'cancelled';
           job.pauseRequested = false;
-          if (job.executionId && options.executor?.cancel)
-            await options.executor.cancel({
+          job.cancelRequested = true;
+          if (job.executionId)
+            stop = {
               jobId: job.jobId,
               requestId: job.requestId,
               attempt: job.attempt,
               executionId: job.executionId,
-            });
-          setState(job, 'cancelled', 'cancel');
+              intent: command.type,
+            };
+          // Keep the slot until the executor confirms it has stopped.
+          if (job.state === 'queued' || job.state === 'paused') setState(job, 'cancelled', 'cancel');
+          else addDiagnostic(job, 'cancel-requested');
           return true;
         }
         if (command.type === 'pause') {
           if (!activeStates.has(job.state)) return job.state === 'paused';
           job.pauseRequested = true;
-          if (job.executionId && options.executor?.cancel)
-            await options.executor.cancel({
+          job.cancelRequested = false;
+          if (job.executionId)
+            stop = {
               jobId: job.jobId,
               requestId: job.requestId,
               attempt: job.attempt,
               executionId: job.executionId,
-            });
+              intent: command.type,
+            };
           addDiagnostic(job, 'pause-requested');
           return true;
         }
@@ -341,8 +398,16 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
           const allowed = command.type === 'resume' ? job.state === 'paused' : job.state === 'failed';
           if (!allowed) return false;
           job.pauseRequested = false;
+          job.cancelRequested = false;
+          if (command.type === 'resume' && job.artifactReady) {
+            job.downloadId = undefined;
+            job.queueOrder = state.nextQueueOrder++;
+            setState(job, 'queued', 'resume-delivery');
+            return true;
+          }
           job.executionId = undefined;
           job.downloadId = undefined;
+          job.artifactReady = false;
           job.terminal = undefined;
           job.queueOrder = state.nextQueueOrder++;
           setState(job, 'queued', command.type);
@@ -358,40 +423,46 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
           if (index < 0 || target < 0 || target >= queued.length) return false;
           const other = queued[target];
           [job.queueOrder, other.queueOrder] = [other.queueOrder, job.queueOrder];
-          job.updatedAt = now();
+          job.updatedAt = Math.max(now(), job.updatedAt + 1);
           addDiagnostic(job, 'reorder');
           return true;
         }
         return false;
-      }),
+      });
+      if (stop) await options.executor?.cancel?.(stop);
+      return result;
+    },
+
+    schedule: async () => {
+      const claimed = await transact(schedule);
+      dispatch(claimed);
+      return readSnapshot();
+    },
 
     bootstrap: async inventory => {
-      const commandOffset = commands.length;
-      await transact(async state => {
+      const claimed = await transact(async state => {
         const currentInventory =
-          inventory ?? (options.executor?.inventory ? await options.executor.inventory() : { executions: [] });
-        const present = new Map(currentInventory.executions.map(item => [item.executionId, item]));
+          inventory ?? (options.executor?.inventory ? await options.executor.inventory() : undefined);
+        // Unknown inventory is not evidence of a dead executor. Preserve claims
+        // until a successful inventory query proves they are absent.
+        const present = currentInventory && new Map(currentInventory.executions.map(item => [item.executionId, item]));
         for (const job of Object.values(state.jobs)) {
-          if (!activeStates.has(job.state) || !job.executionId) continue;
+          if (!present || !activeStates.has(job.state) || !job.executionId) continue;
           const execution = present.get(job.executionId);
           if (execution) {
             if (execution.acknowledged && job.state === 'starting') setState(job, 'running', 'bootstrap-reattach');
+          } else if (job.state === 'finalizing' && job.downloadId === undefined) {
+            job.terminal = { reason: 'Output artifact unavailable after executor restart' };
+            setState(job, 'failed', 'artifact-unavailable');
           } else if (job.state === 'starting' || job.state === 'running') {
             job.executionId = undefined;
-            job.pauseRequested = false;
-            setState(job, 'queued', 'executor-absent', 'executor_unavailable');
+            const next = job.cancelRequested ? 'cancelled' : job.pauseRequested ? 'paused' : 'queued';
+            setState(job, next, 'executor-absent', 'executor_unavailable');
           }
         }
-        await schedule(state);
-        return undefined;
+        return schedule(state);
       });
-      if (options.executor?.start) {
-        for (const command of commands.slice(commandOffset)) {
-          if (dispatchedExecutions.has(command.executionId)) continue;
-          dispatchedExecutions.add(command.executionId);
-          await options.executor.start(command);
-        }
-      }
+      dispatch(claimed);
       return readSnapshot();
     },
 
@@ -413,11 +484,17 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
             percent: event.percent,
           };
           if (event.phase) job.phase = event.phase;
-          job.updatedAt = now();
+          job.updatedAt = Math.max(now(), job.updatedAt + 1);
           addDiagnostic(job, 'executor-progress');
+        } else if (event.type === 'ready') {
+          if (job.state !== 'running' && job.state !== 'finalizing') return false;
+          job.artifactReady = true;
+          job.phase = 'delivering';
+          setState(job, 'finalizing', 'artifact-ready');
         } else if (event.type === 'artifact') {
-          if (job.state !== 'running') return false;
+          if (job.state !== 'running' && job.state !== 'finalizing') return false;
           job.downloadId = event.downloadId;
+          job.artifactReady = true;
           job.phase = 'delivering';
           setState(job, 'finalizing', 'artifact');
         } else if (event.type === 'cancelled') {

@@ -1,21 +1,30 @@
-describe('Content UI Injection', () => {
-  it('should locate the injected content UI (all and example) div on example.com`', async () => {
-    await browser.url('https://example.com');
+import { aiAssert, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 
-    const contentAllDiv = await $('#CEB-extension-all').getElement();
-    await expect(contentAllDiv).toBeDisplayed();
+describe('Content UI injection', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
 
-    const contentExampleDiv = await $('#CEB-extension-example').getElement();
-    await expect(contentExampleDiv).toBeDisplayed();
-  });
+  it('injects all and example UI on example.com', async () =>
+    withPage(async (page, agent) => {
+      await page.goto('https://example.com');
+      await page.locator('#CEB-extension-all').waitFor({ state: 'attached' });
+      await page.locator('#CEB-extension-example').waitFor();
+      await aiAssert(agent, 'The example web page is visible with the Vidsy content UI');
+    }));
 
-  it('should locate the injected content UI all div and not locate example div on google.com', async () => {
-    await browser.url('https://www.google.com');
-
-    const contentAllDiv = await $('#CEB-extension-all').getElement();
-    await expect(contentAllDiv).toBeDisplayed();
-
-    const contentExampleDiv = await $('#CEB-extension-example').getElement();
-    await expect(contentExampleDiv).not.toBeDisplayed();
-  });
+  it('injects only the all-sites UI on other sites', async () =>
+    withPage(async (page, agent) => {
+      await page.route('http://example.com/**', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<!doctype html><title>Other site fixture</title><main>Other site</main>',
+        }),
+      );
+      await page.goto('http://example.com/');
+      await page.locator('#CEB-extension-all').waitFor({ state: 'attached' });
+      expect(await page.locator('#CEB-extension-example').count()).toBe(0);
+      await aiAssert(agent, 'The web page is visible with the Vidsy content UI');
+    }));
 });

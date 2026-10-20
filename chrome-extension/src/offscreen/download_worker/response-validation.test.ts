@@ -23,3 +23,23 @@ test('assertSuccessfulResponse rejects representative HTTP failures and permits 
   assert.doesNotThrow(() => assertSuccessfulResponse(new Response(null, { status: 200 })));
   assert.doesNotThrow(() => assertSuccessfulResponse(new Response(null, { status: 206 })));
 });
+
+test('Range validation rejects ignored ranges, wrong offsets, changed totals and truncated data', async () => {
+  const { assertRangeResponse } = await import('./response-validation');
+  const expected = { start: 10, end: 19, total: 100 };
+  for (const [status, range] of [
+    [200, 'bytes 10-19/100'],
+    [206, 'bytes 0-9/100'],
+    [206, 'bytes 10-19/101'],
+    [206, 'bytes 10-20/100'],
+    [206, 'bytes 10-19/*'],
+  ] as const) {
+    assert.throws(() =>
+      assertRangeResponse(new Response(null, { status, headers: { 'content-range': range } }), expected),
+    );
+  }
+  const valid = new Response(null, { status: 206, headers: { 'content-range': 'bytes 10-19/100' } });
+  assert.doesNotThrow(() => assertRangeResponse(valid, expected, 10));
+  assert.throws(() => assertRangeResponse(valid, expected, 9), /length mismatch/);
+  assert.throws(() => assertRangeResponse(valid, expected, 100), /length mismatch/);
+});

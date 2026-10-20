@@ -178,11 +178,17 @@ type FilenameTemplateContext = {
 };
 
 const buildFilenameContext = (
-  item: Pick<MediaItem, 'title' | 'kind' | 'pageUrl' | 'url' | 'variants'>,
+  item: Pick<MediaItem, 'title' | 'kind' | 'pageUrl' | 'url' | 'variants' | 'resolution'>,
   opts: { resolution?: string; ext?: string; date?: Date } = {},
 ): FilenameTemplateContext => {
   const best = item.variants?.length ? pickBestVariant(item.variants) : undefined;
-  const resolution = opts.resolution ?? (best?.resolution ? shortEdgeLabel(best.resolution) : undefined);
+  const resolution =
+    opts.resolution ??
+    (item.resolution
+      ? shortEdgeLabel(item.resolution)
+      : best?.resolution
+        ? shortEdgeLabel(best.resolution)
+        : undefined);
   let host: string | undefined;
   try {
     host = new URL(item.pageUrl ?? item.url).hostname.replace(/^www\./, '');

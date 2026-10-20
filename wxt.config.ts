@@ -1,6 +1,6 @@
 import { defineConfig } from 'wxt';
-import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 /**
  * WXT's isolated W1 shell. It writes only to `.output/`, leaving the frozen
@@ -12,6 +12,14 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   publicDir: 'chrome-extension/public',
   vite: () => ({
+    // WXT builds entrypoints directly; workspace package dist/ files may be
+    // stale after a source edit. Resolve runtime contracts from source.
+    resolve: {
+      alias: {
+        '@extension/shared': resolve('packages/shared/index.mts'),
+        '@extension/storage': resolve('packages/storage/index.mts'),
+      },
+    },
     plugins: [
       {
         name: 'vidsy-page-src-alias',
@@ -21,8 +29,17 @@ export default defineConfig({
           const index = importer.lastIndexOf(marker);
           if (index === -1) return null;
           const path = resolve(importer.slice(0, index + marker.length), source.slice('@src/'.length));
-          return [path, `${path}.ts`, `${path}.tsx`, `${path}.js`, `${path}.jsx`, resolve(path, 'index.ts'), resolve(path, 'index.tsx')]
-            .find(existsSync) ?? null;
+          return (
+            [
+              path,
+              `${path}.ts`,
+              `${path}.tsx`,
+              `${path}.js`,
+              `${path}.jsx`,
+              resolve(path, 'index.ts'),
+              resolve(path, 'index.tsx'),
+            ].find(existsSync) ?? null
+          );
         },
       },
     ],
@@ -35,8 +52,19 @@ export default defineConfig({
     browser_specific_settings: { gecko: { id: 'example@example.com', strict_min_version: '109.0' } },
     host_permissions: ['<all_urls>'],
     permissions: [
-      'storage', 'scripting', 'tabs', 'sidePanel', 'downloads', 'webRequest', 'declarativeNetRequest',
-      'declarativeNetRequestWithHostAccess', 'offscreen', 'contextMenus', 'unlimitedStorage',
+      'alarms',
+      'storage',
+      'scripting',
+      'tabs',
+      'webNavigation',
+      'sidePanel',
+      'downloads',
+      'webRequest',
+      'declarativeNetRequest',
+      'declarativeNetRequestWithHostAccess',
+      'offscreen',
+      'contextMenus',
+      'unlimitedStorage',
     ],
     content_security_policy: { extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
     cross_origin_embedder_policy: { value: 'require-corp' },

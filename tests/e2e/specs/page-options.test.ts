@@ -1,11 +1,15 @@
-describe('Webextension Options Page', () => {
-  it('should make options page accessible', async () => {
-    const extensionPath = await browser.getExtensionPath();
-    const optionsUrl = `${extensionPath}/options.html`;
+import { aiAssert, extensionUrl, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 
-    await browser.url(optionsUrl);
+describe('Extension options', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
 
-    await expect(browser).toHaveTitle('Options');
-    await expect($('#app-container > *')).toBeExisting();
-  });
+  it('opens successfully', async () =>
+    withPage(async (page, agent) => {
+      await page.goto(extensionUrl('options.html'));
+      expect(await page.title()).toBe('Options');
+      await page.locator('#app-container > *').waitFor();
+      await aiAssert(agent, 'The extension options page has loaded');
+    }));
 });

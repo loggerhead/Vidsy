@@ -1,10 +1,15 @@
-describe('Webextension Side Panel', () => {
-  it('should make side panel accessible', async () => {
-    const extensionPath = await browser.getExtensionPath();
-    const sidePanelUrl = `${extensionPath}/side-panel.html`;
+import { aiAssert, extensionUrl, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 
-    await browser.url(sidePanelUrl);
-    await expect(browser).toHaveTitle('Side Panel');
-    await expect($('#app-container > *')).toBeExisting();
-  });
+describe('Extension side panel', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
+
+  it('opens successfully', async () =>
+    withPage(async (page, agent) => {
+      await page.goto(extensionUrl('side-panel.html'));
+      expect(await page.title()).toBe('Side Panel');
+      await page.locator('#app-container > *').waitFor();
+      await aiAssert(agent, 'The Vidsy side panel has loaded');
+    }));
 });

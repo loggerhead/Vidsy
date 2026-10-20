@@ -1,12 +1,16 @@
+import { aiAssert, extensionUrl, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
 import { canSwitchTheme } from '../helpers/theme.js';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 
-describe('Webextension DevTools Panel', () => {
-  it('should make DevTools panel available', async () => {
-    const extensionPath = await browser.getExtensionPath();
-    const devtoolsPanelUrl = `${extensionPath}/devtools-panel.html`;
+describe('Extension DevTools panel', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
 
-    await browser.url(devtoolsPanelUrl);
-    await expect(browser).toHaveTitle('Devtools Panel');
-    await canSwitchTheme();
-  });
+  it('opens and switches theme', async () =>
+    withPage(async (page, agent) => {
+      await page.goto(extensionUrl('devtools-panel.html'));
+      expect(await page.title()).toBe('Devtools Panel');
+      await aiAssert(agent, 'The extension DevTools panel has loaded');
+      await canSwitchTheme(page, agent);
+    }));
 });

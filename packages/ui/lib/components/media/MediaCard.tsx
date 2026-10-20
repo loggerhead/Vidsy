@@ -91,8 +91,10 @@ export const MediaCard = ({
     'mux',
     'finalize',
   ]);
-  // Download submission and progress storage share the stable media item id.
-  const progress = downloads[item.id];
+  // Each request has its own key; relate its progress to the source media item.
+  const progress = Object.values(downloads)
+    .filter(entry => entry.item?.id === item.id)
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
   const isBusy = downloadState.busyUrl === item.id || (progress != null && ACTIVE_STAGES.has(progress.stage));
   const isComplete = progress?.stage === 'success' && progress.downloadId;
 

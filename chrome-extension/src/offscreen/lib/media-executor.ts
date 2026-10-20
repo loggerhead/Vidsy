@@ -1,3 +1,4 @@
+import { activeAbortControllers } from './segment-fetcher';
 import { muxInWorker } from './worker-client';
 import type { ExecutableMuxPlan, MediaProcessingPlan, PlanInput, UnsupportedPlan } from './media-processing';
 
@@ -23,8 +24,10 @@ export const executeMuxPlan = async (args: {
   input: PlanInput;
   durationSeconds?: number;
   estimatedBytes?: number;
-}): Promise<{ outputOpfsName: string; totalBytes: number }> =>
-  muxInWorker({
+}): Promise<{ outputOpfsName: string; totalBytes: number }> => {
+  const signal = activeAbortControllers.get(args.jobKey)?.signal;
+  signal?.throwIfAborted();
+  const result = await muxInWorker({
     jobKey: args.jobKey,
     outputOpfsName: args.outputOpfsName,
     plan: args.plan,
@@ -32,3 +35,6 @@ export const executeMuxPlan = async (args: {
     durationSeconds: args.durationSeconds,
     estimatedBytes: args.estimatedBytes,
   });
+  signal?.throwIfAborted();
+  return result;
+};

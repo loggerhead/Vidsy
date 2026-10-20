@@ -8,20 +8,29 @@ import {
   setMainVideoPresent,
   updatePresentationMetadata,
 } from './lib/detection';
-import { cancelDownloadsForTab, handleDownload, pauseDownload, cancelDownload } from './lib/download';
+import {
+  cancelDownloadsForTab,
+  handleDownload,
+  againDownload,
+  pauseDownload,
+  cancelDownload,
+  retryDownload,
+  clearDownloads,
+  handleExecutionReport,
+} from './lib/download';
 import { setupDownloadInterceptor, resumeBrowserDownload, openDownloadsWindow } from './lib/download-interceptor';
-import { reorderQueueItem } from './lib/download-queue';
+import { reorderQueueItem, runtime as downloadRuntime } from './lib/download-queue';
 import {
   authorizeUrlForDownload,
+  releaseUrlForDownload,
   clearCapturedHeadersForTab,
-  cleanupStaleDnrRules,
   configureHeaderCaptureTabFilter,
   setupHeaderCapture,
 } from './lib/header-capture';
+import { clearHistory } from './lib/history';
 import { deriveKind, deriveFileName } from './lib/media-utils';
 import { createNetworkCaptureAdmission } from './lib/network-capture-admission';
 import { classifyAndAddUrl } from './lib/paste-url';
-import { updateProgress, clearProgress, clearTerminalProgress } from './lib/progress';
 import { createTabWorkLifecycle } from './lib/tab-work-lifecycle';
 import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
 import { configureSessionAccessLevel } from '@extension/storage';
@@ -29,6 +38,9 @@ import type { MediaMessage } from '@extension/shared';
 
 export const startBackground = (): void => {
   const log = createLogger('background');
+  const sessionAccessReady = configureSessionAccessLevel().catch((error: unknown) => {
+    log.error('storage.session_access_failed', error);
+  });
   const dispatchTabLifecycleEvent = async (tabId: number, eventName: string, allFrames: boolean) => {
     try {
       await chrome.scripting.executeScript({
@@ -40,8 +52,20 @@ export const startBackground = (): void => {
       // The tab may have closed or be a browser-internal page without an injected script.
     }
   };
+  const dispatchFrameLifecycleEvent = async (tabId: number, frameId: number, eventName: string) => {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        func: name => window.dispatchEvent(new CustomEvent(name)),
+        args: [eventName],
+      });
+    } catch {
+      // The frame may have navigated before its ready message was handled.
+    }
+  };
   const tabWork = createTabWorkLifecycle({
     start: async ({ tabId, signal }) => {
+      await sessionAccessReady;
       if (signal.aborted) return;
       await Promise.all([
         dispatchTabLifecycleEvent(tabId, 'vidsy:start-content', true),
@@ -89,10 +113,6 @@ export const startBackground = (): void => {
     handle: handleNetworkDetection,
   });
 
-  void configureSessionAccessLevel().catch((error: unknown) => {
-    log.error('storage.session_access_failed', error);
-  });
-
   // ─── Offscreen error monitor ───
   setInterval(() => {
     chrome.storage.local.get('__offscreen_error__', res => {
@@ -104,7 +124,6 @@ export const startBackground = (): void => {
 
   // ─── Header capture & stale DNR cleanup ───
   setupHeaderCapture();
-  cleanupStaleDnrRules();
 
   // ─── Browser download interceptor (opt-in via settings) ───
   setupDownloadInterceptor();
@@ -148,19 +167,37 @@ export const startBackground = (): void => {
         : undefined,
     });
     (async () => {
-      if (message.type === 'offscreen/progress') {
-        log.debug('message.offscreen_progress', { key: message.payload.key, stage: message.payload.prog?.stage });
-        await updateProgress(message.payload.key, message.payload.prog);
+      if (message.type === 'content/ready' && (message.scope === 'all' || message.scope === 'ui')) {
+        const tabId = sender.tab?.id;
+        if (tabId !== undefined && (message.scope === 'all' || sender.frameId === 0)) {
+          await sessionAccessReady;
+          await tabWork.track(tabId, true, sender.tab?.url);
+          await dispatchFrameLifecycleEvent(
+            tabId,
+            sender.frameId ?? 0,
+            message.scope === 'all' ? 'vidsy:start-content' : 'vidsy:start-content-ui',
+          );
+        }
         sendResponse({ ok: true });
         return;
       }
-      if (message.type === 'offscreen/clear') {
-        await clearProgress(message.payload.key);
+      if (message.type === 'offscreen/execution-event') {
+        await handleExecutionReport(message.payload);
         sendResponse({ ok: true });
         return;
       }
       if (message.type === 'offscreen/authorize-download-url') {
-        await authorizeUrlForDownload(message.payload.key, message.payload.url);
+        const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === message.payload.key);
+        if (!job?.executionId || job.cancelRequested || job.pauseRequested) {
+          sendResponse({ ok: false, error: 'Download cancelled' });
+          return;
+        }
+        await authorizeUrlForDownload(job.executionId, message.payload.url, message.payload.transient);
+        sendResponse({ ok: true, downloadKey: job.executionId });
+        return;
+      }
+      if (message.type === 'offscreen/release-download-url') {
+        await releaseUrlForDownload(message.payload.downloadKey, message.payload.url);
         sendResponse({ ok: true });
         return;
       }
@@ -197,6 +234,16 @@ export const startBackground = (): void => {
         sendResponse(result);
         return;
       }
+      if (msg.type === MEDIA_MESSAGE.CONTROL) {
+        if (msg.payload.intent === 'again') {
+          const result = await againDownload(msg.payload.key, msg.payload.requestId ?? crypto.randomUUID());
+          sendResponse(result ? { ok: true, ...result } : { ok: false, error: 'Download task not found' });
+          return;
+        }
+        const ok = await retryDownload(msg.payload.key, msg.payload.intent);
+        sendResponse({ ok });
+        return;
+      }
       if (msg.type === MEDIA_MESSAGE.CANCEL) {
         const key = msg.payload.key ?? msg.payload.url;
         if (!key) {
@@ -204,9 +251,9 @@ export const startBackground = (): void => {
           return;
         }
         if (msg.payload.intent === 'pause') {
-          pauseDownload(key);
+          await pauseDownload(key);
         } else {
-          cancelDownload(key);
+          await cancelDownload(key);
         }
         sendResponse({ ok: true });
         return;
@@ -218,7 +265,7 @@ export const startBackground = (): void => {
         return;
       }
       if (msg.type === MEDIA_MESSAGE.CLEAR_DOWNLOADS) {
-        await clearTerminalProgress(msg.payload?.keys);
+        await clearDownloads(msg.payload?.keys);
         sendResponse({ ok: true });
         return;
       }
@@ -233,9 +280,11 @@ export const startBackground = (): void => {
         // Open the per-download progress window BEFORE kicking off the
         // download — keyed on the URL so each download gets its own window
         // (handleDownload uses url as the storage key by default).
-        void openDownloadsWindow(msg.payload.url);
+        const requestKey = crypto.randomUUID();
+        void openDownloadsWindow(requestKey);
         const result = await handleDownload({
           url: msg.payload.url,
+          key: requestKey,
           fileName: msg.payload.fileName ?? deriveFileName(msg.payload.url),
           title: msg.payload.fileName,
           tabId,
@@ -304,6 +353,11 @@ export const startBackground = (): void => {
         const pageUrl = sender.tab?.url;
         const result = await classifyAndAddUrl(msg.payload.url, tabId, pageUrl);
         sendResponse(result);
+        return;
+      }
+      if (message.type === 'media/clear-history') {
+        await clearHistory();
+        sendResponse({ ok: true });
         return;
       }
       // Play / Show in folder for completed downloads
@@ -426,11 +480,12 @@ export const startBackground = (): void => {
   chrome.tabs.onRemoved.addListener(tabId => {
     void tabWork.close(tabId);
   });
+  // tabs.onUpdated can report loading for a same-document URL change. Only a
+  // committed main-frame navigation replaces the document and its detections.
+  chrome.webNavigation.onCommitted.addListener(details => {
+    if (details.frameId === 0) void tabWork.navigationStarted(details.tabId, details.url);
+  });
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading' || changeInfo.url !== undefined) {
-      void tabWork.navigationStarted(tabId, changeInfo.url);
-      return;
-    }
     if (changeInfo.status === 'complete') void tabWork.pageReady(tabId);
   });
   chrome.tabs.onActivated.addListener(({ tabId }) => {

@@ -1,116 +1,142 @@
-import { readdir, stat, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { aiAssert, extensionWorker, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
-type SiteCase = { name: string; url: string };
+type SiteCase = { name: string; url: string; requiresLogin?: boolean };
 
-const cases: SiteCase[] = [
-  {
-    name: 'Bilibili',
-    url: 'https://www.bilibili.com/video/BV1HnM269EV7/?spm_id_from=333.1007.tianma.1-3-3.click&vd_source=94e84eeb9c84c0082db21db3c32160ff',
-  },
+const sites: SiteCase[] = [
+  { name: 'Bilibili', url: 'https://www.bilibili.com/video/BV1j5nj68E48', requiresLogin: true },
+  { name: 'X', url: 'https://x.com/HiTw93/status/2101676087222964545', requiresLogin: true },
+  { name: 'AcFun', url: 'https://www.acfun.cn/v/ac48903653' },
   { name: 'YouTube', url: 'https://www.youtube.com/watch?v=SiKWVMUcGiE' },
-  { name: 'AcFun', url: 'https://www.acfun.cn/v/ac48766652' },
-  { name: 'MissAV', url: 'https://missav.ws/en/midv-999-english-subtitle' },
 ];
-
-const downloadDirectory = process.env.VIDSY_E2E_DOWNLOAD_DIR;
-const enabled = process.env.VIDSY_LIVE_DOWNLOAD_E2E === 'true' && !!downloadDirectory;
+const downloadDirectory = process.env.VIDSY_E2E_DOWNLOAD_DIR
+  ? resolve(import.meta.dirname, '../../..', process.env.VIDSY_E2E_DOWNLOAD_DIR)
+  : undefined;
+const enabled = process.env.VIDSY_LIVE_DOWNLOAD_E2E === 'true' && Boolean(downloadDirectory);
 const minimumBytes = 1024 * 1024;
 
-const files = async () =>
+const completedFiles = async () =>
   (await readdir(downloadDirectory!, { withFileTypes: true }))
     .filter(entry => entry.isFile() && !entry.name.endsWith('.crdownload'))
     .map(entry => entry.name);
 
 const waitForCompletedFile = async (before: string[]) => {
-  let candidate: string | undefined;
-  await browser.waitUntil(
-    async () => {
-      const known = new Set(before);
-      const current = await files();
-      candidate = current.find(file => !known.has(file));
-      if (!candidate) return false;
-      const info = await stat(join(downloadDirectory!, candidate));
-      return info.size > minimumBytes;
-    },
-    { timeout: 15 * 60 * 1000, interval: 1000, timeoutMsg: 'No completed download larger than 1 MB appeared' },
-  );
-  return candidate!;
+  let result: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const previous = new Set(before);
+        const candidate = (await completedFiles()).find(file => !previous.has(file));
+        if (!candidate) return false;
+        result = candidate;
+        return true;
+      },
+      { timeout: 15 * 60_000, interval: 1000 },
+    )
+    .toBe(true);
+  return result!;
 };
 
-describe('Live media downloads', function () {
-  before(function () {
-    if (!enabled || (browser.capabilities as WebdriverIO.Capabilities).browserName !== 'chrome') this.skip();
+describe.skipIf(!enabled)('Live media downloads', () => {
+  beforeAll(async () => {
+    await mkdir(downloadDirectory!, { recursive: true });
+    await startBrowser();
   });
+  afterAll(stopBrowser);
 
-  for (const site of cases) {
-    it(`${site.name} downloads one file larger than 1 MB`, async function () {
-      this.timeout(20 * 60 * 1000);
-      const before = await files();
-      await browser.url(site.url);
-      try {
-        await browser.waitUntil(
-          async () =>
-            browser.execute(() => {
-              const host = document.querySelector('#CEB-extension-all');
-              return Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).some(
-                button => button.getAttribute('aria-label') === 'Show download options',
+  for (const site of sites) {
+    it.skipIf(
+      Boolean(
+        site.requiresLogin &&
+          !(site.name === 'X' && process.env.VIDSY_E2E_X_COOKIES_FILE) &&
+          !process.env.VIDSY_E2E_PROFILE_DIR,
+      ),
+    )(
+      `${site.name} downloads a file of at least 1 MB`,
+      async () =>
+        withPage(async (page, agent) => {
+          const before = await completedFiles();
+          const cdp = await page.context().newCDPSession(page);
+          await cdp.send('Network.enable');
+          await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+          await page.goto(site.url, { waitUntil: 'domcontentloaded' });
+          if (site.name === 'Bilibili') {
+            const video = page.locator('video').first();
+            await video.waitFor();
+            await video.evaluate(element => {
+              const media = element as HTMLVideoElement;
+              media.pause();
+              media.currentTime = 0;
+            });
+          }
+          if (site.name === 'X') {
+            const video = page.locator('video').first();
+            await video.waitFor();
+            await video.scrollIntoViewIfNeeded();
+          }
+          const content = page.locator('#CEB-extension-all');
+          const compactButton = content.locator('button[aria-label="Show download options"]');
+          try {
+            await compactButton.waitFor({ timeout: Number(process.env.VIDSY_E2E_CONTROL_TIMEOUT_MS ?? 120_000) });
+          } catch (error) {
+            const pageState = await page.evaluate(() => ({
+              url: location.href,
+              title: document.title,
+              text: document.body?.innerText.slice(0, 800),
+              contentHostPresent: Boolean(document.querySelector('#CEB-extension-all')),
+              extensionButtons: Array.from(
+                document.querySelector('#CEB-extension-all')?.shadowRoot?.querySelectorAll('button') ?? [],
+                button => button.getAttribute('aria-label') ?? button.textContent?.trim(),
+              ).slice(0, 20),
+              videos: Array.from(document.querySelectorAll('video'), video => ({
+                width: video.offsetWidth,
+                height: video.offsetHeight,
+                currentSrc: video.currentSrc.slice(0, 100),
+                poster: video.poster.slice(0, 100),
+              })).slice(0, 8),
+            }));
+            const detectedItems = await extensionWorker().evaluate(async () => {
+              const state = (await chrome.storage.session.get('media-detections'))['media-detections'] ?? {};
+              return (Object.values(state).flat() as { kind: string; source: string; pageUrl?: string }[]).map(
+                item => ({
+                  kind: item.kind,
+                  source: item.source,
+                  pageUrl: item.pageUrl,
+                }),
               );
-            }),
-          {
-            timeout: 120000,
-            interval: 1000,
-            timeoutMsg: 'No compact download control found in content UI shadow root',
-          },
-        );
-      } catch (error) {
-        const diagnostic = await browser.execute(() => ({
-          url: location.href,
-          title: document.title,
-          text: (document.body?.innerText ?? '').slice(0, 2000),
-          buttons: Array.from(document.querySelectorAll('button'))
-            .map(button => button.innerText)
-            .slice(0, 30),
-        }));
-        throw new Error(`${site.name} download control unavailable: ${JSON.stringify(diagnostic)}; ${String(error)}`);
-      }
-      const clicked = await browser.execute(() => {
-        const host = document.querySelector('#CEB-extension-all');
-        const button = Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).find(
-          element => element.getAttribute('aria-label') === 'Show download options',
-        );
-        if (!button) return false;
-        button.click();
-        return true;
-      });
-      expect(clicked).toBe(true);
-      await browser.waitUntil(
-        async () =>
-          browser.execute(() => {
-            const host = document.querySelector('#CEB-extension-all');
-            return Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).some(button =>
-              button.textContent?.includes('Download'),
+            });
+            throw new Error(
+              `${site.name} download control unavailable: ${JSON.stringify({ ...pageState, detectedItems })}; ${String(error)}`,
             );
-          }),
-        { timeout: 5000, interval: 100, timeoutMsg: 'Download panel did not open from compact control' },
-      );
-      const started = await browser.execute(() => {
-        const host = document.querySelector('#CEB-extension-all');
-        const button = Array.from(host?.shadowRoot?.querySelectorAll('button') ?? []).find(element =>
-          element.textContent?.includes('Download'),
-        );
-        if (!button) return false;
-        button.click();
-        return true;
-      });
-      expect(started).toBe(true);
-      const downloaded = await waitForCompletedFile(before);
-      const info = await stat(join(downloadDirectory!, downloaded));
-      expect(info.size).toBeGreaterThan(minimumBytes);
+          }
+          if (process.env.VIDSY_E2E_AI === 'off') await compactButton.click();
+          else await agent.aiTap('the Vidsy Show download options button');
 
-      // Keep the opt-in suite repeatable without deleting user files outside
-      // the explicitly configured test directory.
-      await unlink(join(downloadDirectory!, downloaded));
-    });
+          const downloadChoices = content.locator('button:not([aria-label])');
+          const x1080pChoice = downloadChoices.filter({ hasText: /1080p/i }).first();
+          const downloadButton =
+            site.name === 'X' && (await x1080pChoice.count()) ? x1080pChoice : downloadChoices.first();
+          await downloadButton.waitFor();
+          await aiAssert(agent, 'The Vidsy download menu is open with a video quality choice');
+          if (process.env.VIDSY_E2E_AI === 'off') await downloadButton.click();
+          else
+            await agent.aiTap(
+              site.name === 'X'
+                ? 'the 1080p video download choice in the Vidsy menu'
+                : 'the first video download choice in the Vidsy menu',
+            );
+
+          const downloaded = await waitForCompletedFile(before);
+          const filePath = join(downloadDirectory!, downloaded);
+          try {
+            expect((await stat(filePath)).size).toBeGreaterThanOrEqual(minimumBytes);
+          } finally {
+            if (process.env.VIDSY_KEEP_E2E_ARTIFACTS !== '1') await unlink(filePath);
+          }
+        }),
+      20 * 60_000,
+    );
   }
 });

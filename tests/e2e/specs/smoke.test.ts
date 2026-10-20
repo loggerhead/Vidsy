@@ -1,7 +1,14 @@
-describe('The example page can be loaded', () => {
-  it('should be able to go to example page', async () => {
-    await browser.url('https://www.example.com');
+import { aiAssert, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
+import { beforeAll, afterAll, describe, it, expect } from 'vitest';
 
-    await expect(browser).toHaveTitle('Example Domain');
-  });
+describe('Example page', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
+
+  it('loads', async () =>
+    withPage(async (page, agent) => {
+      await page.goto('https://www.example.com');
+      expect(await page.title()).toBe('Example Domain');
+      await aiAssert(agent, 'The Example Domain page is visible');
+    }));
 });

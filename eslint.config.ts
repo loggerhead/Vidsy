@@ -43,7 +43,9 @@ export default config(
       sourceType: 'module',
       parserOptions: {
         ecmaFeatures: { jsx: true },
-        projectService: true,
+        projectService: {
+          allowDefaultProject: ['entrypoints/all.content.ts', 'entrypoints/content-ui.content.ts'],
+        },
       },
       globals: {
         ...browser,

@@ -9,6 +9,7 @@ export type JobKey = string;
 
 export type SegmentSpec = {
   url: string;
+  range?: { start: number; end: number };
   keyInfo?: HlsKeyInfo;
   sequenceNumber: number;
 };
@@ -20,6 +21,7 @@ export type FetchSegmentsRequest = {
   opfsName: string;
   segments: SegmentSpec[];
   initUrl?: string;
+  initRange?: { start: number; end: number };
   keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
 };
@@ -43,6 +45,7 @@ export type FetchRangesRequest = {
   keyHeaders?: Record<string, string>;
   ranges: { start: number; end: number }[];
   totalBytes: number;
+  resourceVersion?: string;
   stage: 'download-video' | 'download-audio';
   // Prior chunk states from a paused or interrupted run of this same key.
   // The worker uses these to skip dispatching chunks that already completed
@@ -93,6 +96,7 @@ export type MuxRequest = {
 export type PingRequest = { type: 'ping' };
 
 export type WorkerRequest =
+  | { type: 'url-authorized'; authorizationId: string; downloadKey?: string; error?: string }
   | FetchSegmentsRequest
   | FetchUrlRequest
   | FetchRangesRequest
@@ -147,4 +151,13 @@ export type WorkerError = {
 
 export type Pong = { type: 'pong' };
 
-export type WorkerResponse = ProgressUpdate | FetchDone | MuxDone | GetFileDone | RemoveDone | WorkerError | Pong;
+export type WorkerResponse =
+  | ProgressUpdate
+  | FetchDone
+  | MuxDone
+  | GetFileDone
+  | RemoveDone
+  | WorkerError
+  | Pong
+  | { type: 'authorize-url'; authorizationId: string; jobKey: string; url: string }
+  | { type: 'release-url'; downloadKey: string; url: string };

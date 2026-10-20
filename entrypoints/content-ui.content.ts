@@ -1,5 +1,5 @@
-import { defineContentScript } from 'wxt/utils/define-content-script';
 import { startAllContentUi } from '../pages/content-ui/src/matches/all/index';
+import { defineContentScript } from 'wxt/utils/define-content-script';
 
 export default defineContentScript({
   matches: ['http://*/*', 'https://*/*', '<all_urls>'],
@@ -14,5 +14,8 @@ export default defineContentScript({
       stop?.();
       stop = undefined;
     });
+    if (window === window.top) {
+      void chrome.runtime.sendMessage({ type: 'content/ready', scope: 'ui' }).catch(() => undefined);
+    }
   },
 });

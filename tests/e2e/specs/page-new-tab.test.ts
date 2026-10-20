@@ -1,16 +1,16 @@
+import { aiAssert, extensionUrl, startBrowser, stopBrowser, withPage } from '../helpers/browser.js';
 import { canSwitchTheme } from '../helpers/theme.js';
+import { beforeAll, afterAll, describe, it } from 'vitest';
 
-describe('Webextension New Tab', () => {
-  it('should open the extension page when a new tab is opened', async () => {
-    const extensionPath = await browser.getExtensionPath();
-    // WXT emits this as a regular extension page; the production manifest does
-    // not override Chrome's built-in new-tab page.
-    const newTabUrl = `${extensionPath}/new-tab.html`;
+describe('Extension new tab page', () => {
+  beforeAll(startBrowser);
+  afterAll(stopBrowser);
 
-    await browser.url(newTabUrl);
-
-    const appDiv = await $('.App').getElement();
-    await expect(appDiv).toBeExisting();
-    await canSwitchTheme();
-  });
+  it('opens and switches theme', async () =>
+    withPage(async (page, agent) => {
+      await page.goto(extensionUrl('new-tab.html'));
+      await page.locator('.App').waitFor();
+      await aiAssert(agent, 'The extension new tab page has loaded');
+      await canSwitchTheme(page, agent);
+    }));
 });

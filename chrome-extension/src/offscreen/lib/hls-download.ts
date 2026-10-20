@@ -1,4 +1,4 @@
-import { fetchResolvedHlsPlaylist, headersForFetch } from './hls-request';
+import { fetchResolvedHlsPlaylist } from './hls-request';
 import { hlsManifestDurationSeconds, jsfetchInputForOpfs, jsfetchInputForUrl, preflightDiskSpace } from './libav-mux';
 import { parseHlsPlaylist } from './m3u8-parser';
 import { describeHls, mergeTrackDescriptors } from './media-descriptor';
@@ -29,62 +29,64 @@ export const downloadHlsMuxed = async (
   audioUrl?: string,
 ): ReturnType<typeof prepareOutputDelivery> => {
   void fileName;
-  await updateProgress(key, { stage: 'fetch-manifest', downloadedBytes: 0 });
-
-  const resolved = await fetchResolvedHlsPlaylist(playlistUrl, headers, {
-    authorizeUrl: url => authorizeDownloadUrl(key, url),
-  });
-
-  const { url: variantUrl, manifestText } = resolved;
-  const audio = audioUrl
-    ? await fetchResolvedHlsPlaylist(audioUrl, headers, { authorizeUrl: url => authorizeDownloadUrl(key, url) })
-    : resolved.audio;
-
-  const durationSeconds = hlsManifestDurationSeconds(manifestText);
-  let descriptor = await describeHls({
-    manifestText,
-    manifestUrl: variantUrl,
-    headers: headersForFetch(headers),
-    durationSeconds,
-  });
-  if (audio) {
-    const audioDescriptor = await describeHls({
-      manifestText: audio.manifestText,
-      manifestUrl: audio.url,
-      headers: headersForFetch(headers),
-    });
-    if (!audioDescriptor.tracks.some(track => track.type === 'audio')) {
-      throw new Error('The declared HLS audio rendition has no audio track');
-    }
-    descriptor = mergeTrackDescriptors([descriptor, audioDescriptor]);
-  }
-  const plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
-  if (plan.type === 'passthrough') throw new Error('Unexpected passthrough plan for HLS input');
-  const outputOpfsName = opfsNameFor(key, 'out', plan.output.container);
-  let inputOpfsName: string | null = null;
-  let inputBlobUrl: string | null = null;
-
   const abortController = new AbortController();
   activeAbortControllers.set(key, abortController);
   abortController.signal.addEventListener('abort', () => cancelWorkerJob(key));
-
   const trackFiles: string[] = [];
   const trackBlobs: string[] = [];
+  let outputOpfsName: string | null = null;
+  let inputOpfsName: string | null = null;
+  let inputBlobUrl: string | null = null;
   try {
+    await updateProgress(key, { stage: 'fetch-manifest', downloadedBytes: 0 });
+
+    const resolved = await fetchResolvedHlsPlaylist(playlistUrl, headers, {
+      authorizeUrl: url => authorizeDownloadUrl(key, url),
+      signal: abortController.signal,
+    });
+
+    const { url: variantUrl, manifestText } = resolved;
+    const audio = audioUrl
+      ? await fetchResolvedHlsPlaylist(audioUrl, headers, {
+          authorizeUrl: url => authorizeDownloadUrl(key, url),
+          signal: abortController.signal,
+        })
+      : resolved.audio;
+
+    const durationSeconds = hlsManifestDurationSeconds(manifestText);
+    let descriptor = await describeHls({
+      manifestText,
+      manifestUrl: variantUrl,
+      headers,
+      authorizeUrl: url => authorizeDownloadUrl(key, url),
+      signal: abortController.signal,
+      durationSeconds,
+    });
+    if (audio) {
+      const audioDescriptor = await describeHls({
+        manifestText: audio.manifestText,
+        manifestUrl: audio.url,
+        headers,
+        authorizeUrl: url => authorizeDownloadUrl(key, url),
+        signal: abortController.signal,
+      });
+      if (!audioDescriptor.tracks.some(track => track.type === 'audio')) {
+        throw new Error('The declared HLS audio rendition has no audio track');
+      }
+      descriptor = mergeTrackDescriptors([descriptor, audioDescriptor]);
+    }
+    const plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
+    if (plan.type === 'passthrough') throw new Error('Unexpected passthrough plan for HLS input');
+    outputOpfsName = opfsNameFor(key, 'out', plan.output.container);
+    abortController.signal.throwIfAborted();
     if (audio) {
       if (plan.type === 'concatenate-fmp4') throw new Error('Separate HLS tracks require muxing');
       let totalBytes = 0;
       const inputs: string[] = [];
       for (const [index, playlist] of [resolved, audio].entries()) {
         if (abortController.signal.aborted) throw new Error('Download cancelled');
-        const { segments, mapUrl } = parseHlsPlaylist(playlist.manifestText, playlist.url);
+        const { segments, mapUrl, mapRange } = parseHlsPlaylist(playlist.manifestText, playlist.url);
         if (!segments.length) throw new Error('No segments in HLS playlist');
-        const resources = [mapUrl, ...segments.flatMap(segment => [segment.url, segment.keyInfo?.uri])].filter(
-          (url): url is string => Boolean(url),
-        );
-        for (const url of new Map(resources.map(url => [new URL(url).hostname, url])).values()) {
-          await authorizeDownloadUrl(key, url);
-        }
         const name = opfsNameFor(key, index === 0 ? 'video' : 'audio', mapUrl ? 'mp4' : 'ts');
         trackFiles.push(name);
         const result = await fetchSegmentsToOpfs({
@@ -92,6 +94,7 @@ export const downloadHlsMuxed = async (
           opfsName: name,
           segments,
           initUrl: mapUrl,
+          initRange: mapRange,
           keyHeaders: headers,
           stage: index === 0 ? 'download-video' : 'download-audio',
         });
@@ -110,7 +113,7 @@ export const downloadHlsMuxed = async (
         durationSeconds,
         estimatedBytes: totalBytes,
       });
-    } else if (!plan.prefetchToOpfs && plan.type !== 'concatenate-fmp4') {
+    } else if (!headers && !plan.prefetchToOpfs && plan.type !== 'concatenate-fmp4') {
       // Direct: libav demuxes HLS natively and writes the MP4/MP3 to OPFS.
       const jsfetchUrl = jsfetchInputForUrl(variantUrl);
       await executeMuxPlan({
@@ -123,23 +126,17 @@ export const downloadHlsMuxed = async (
     } else {
       // Prefetch: download segments with retry and strict response validation,
       // then feed libav one stable OPFS-backed input.
-      const { segments, mapUrl } = parseHlsPlaylist(manifestText, variantUrl);
+      const { segments, mapUrl, mapRange } = parseHlsPlaylist(manifestText, variantUrl);
       if (segments.length === 0) throw new Error('No segments in HLS playlist');
-      const resourceUrls = [mapUrl, ...segments.flatMap(segment => [segment.url, segment.keyInfo?.uri])].filter(
-        (url): url is string => Boolean(url),
-      );
-      const resourceUrlByHost = new Map(resourceUrls.map(url => [new URL(url).hostname, url]));
-      for (const resourceUrl of resourceUrlByHost.values()) {
-        await authorizeDownloadUrl(key, resourceUrl);
-      }
       const isFmp4 = Boolean(mapUrl);
       inputOpfsName = opfsNameFor(key, 'in', isFmp4 ? 'mp4' : 'ts');
 
       const { totalBytes } = await fetchSegmentsToOpfs({
         jobKey: key,
         opfsName: inputOpfsName,
-        segments: segments.map(s => ({ url: s.url, keyInfo: s.keyInfo, sequenceNumber: s.sequenceNumber })),
+        segments,
         initUrl: mapUrl,
+        initRange: mapRange,
         keyHeaders: headers,
         stage: 'download-video',
       });
@@ -174,7 +171,7 @@ export const downloadHlsMuxed = async (
 
       URL.revokeObjectURL(inputBlobUrl);
       inputBlobUrl = null;
-      void removeOpfs(inputOpfsName).catch(() => undefined);
+      await removeOpfs(inputOpfsName).catch(() => undefined);
       inputOpfsName = null;
     }
 
@@ -194,12 +191,12 @@ export const downloadHlsMuxed = async (
         /* ignore */
       }
     }
-    if (inputOpfsName) void removeOpfs(inputOpfsName).catch(() => undefined);
-    void removeOpfs(outputOpfsName).catch(() => undefined);
+    if (inputOpfsName) await removeOpfs(inputOpfsName).catch(() => undefined);
+    if (outputOpfsName) await removeOpfs(outputOpfsName).catch(() => undefined);
     throw err;
   } finally {
     for (const url of trackBlobs) URL.revokeObjectURL(url);
-    for (const name of trackFiles) void removeOpfs(name).catch(() => undefined);
+    for (const name of trackFiles) await removeOpfs(name).catch(() => undefined);
     activeAbortControllers.delete(key);
     if (abortController.signal.aborted) {
       await updateProgress(key, { stage: 'cancelled', downloadedBytes: 0 });

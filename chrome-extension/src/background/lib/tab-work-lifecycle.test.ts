@@ -87,6 +87,31 @@ test('navigation captures early network requests while old-document cleanup is s
   assert.equal(lifecycle.isRunning(1), true);
 });
 
+test('content readiness waits for old-document cleanup before starting page work', async () => {
+  let releaseCleanup!: () => void;
+  const cleanup = new Promise<void>(resolve => {
+    releaseCleanup = resolve;
+  });
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.generation}`),
+    stop: async work => {
+      events.push(`stop:${work.generation}`);
+      await cleanup;
+    },
+  });
+
+  await lifecycle.track(1, true);
+  const navigation = lifecycle.navigationStarted(1);
+  const ready = lifecycle.track(1, true);
+  await Promise.resolve();
+  assert.deepEqual(events, ['start:0', 'stop:1']);
+
+  releaseCleanup();
+  await Promise.all([navigation, ready]);
+  assert.deepEqual(events, ['start:0', 'stop:1', 'start:1']);
+});
+
 test('initial loading activation and navigation share one capture generation', async () => {
   const events: string[] = [];
   const lifecycle = createTabWorkLifecycle({
@@ -121,20 +146,45 @@ test('loading activation stays in the same generation even if document work star
   assert.deepEqual(events, ['start:1:0']);
 });
 
-test('a response aligns a completed replacement URL before onUpdated arrives', async () => {
+test('a response after a same-document URL change keeps existing work and detections', async () => {
   const events: string[] = [];
   const lifecycle = createTabWorkLifecycle({
     start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
     stop: async work => void events.push(`stop:${work.tabId}:${work.generation}`),
   });
 
-  await lifecycle.track(1, true, 'about:blank');
-  await lifecycle.prepareCapture(1, false, 'https://example.com/watch');
+  await lifecycle.track(1, true, 'https://example.com/watch');
+  await lifecycle.prepareCapture(1, false, 'https://example.com/watch?source=feed');
 
-  assert.equal(lifecycle.generationForCapture(1), 1);
-  assert.deepEqual(events, ['start:1:0', 'stop:1:1']);
+  assert.equal(lifecycle.generationForCapture(1), 0);
+  assert.deepEqual(events, ['start:1:0']);
+  assert.equal(lifecycle.isRunning(1), true);
+});
 
-  await lifecycle.navigationStarted(1, 'https://example.com/watch');
+test('a loading response after a same-document URL change does not clear detections', async () => {
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
+    stop: async work => void events.push(`stop:${work.tabId}:${work.generation}`),
+  });
+
+  await lifecycle.track(1, true, 'https://example.com/watch');
+  await lifecycle.prepareCapture(1, true, 'https://example.com/watch?source=feed');
+
+  assert.equal(lifecycle.generationForCapture(1), 0);
+  assert.deepEqual(events, ['start:1:0']);
+  assert.equal(lifecycle.isRunning(1), true);
+});
+
+test('a committed document replacement clears and restarts its generation', async () => {
+  const events: string[] = [];
+  const lifecycle = createTabWorkLifecycle({
+    start: async work => void events.push(`start:${work.tabId}:${work.generation}`),
+    stop: async work => void events.push(`stop:${work.tabId}:${work.generation}`),
+  });
+
+  await lifecycle.track(1, true, 'https://example.com/watch');
+  await lifecycle.navigationStarted(1, 'https://example.com/next');
   await lifecycle.pageReady(1);
   assert.equal(lifecycle.generationForCapture(1), 1);
   assert.deepEqual(events, ['start:1:0', 'stop:1:1', 'start:1:1']);

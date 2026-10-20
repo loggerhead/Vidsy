@@ -105,6 +105,7 @@ export type MediaDownloadProgress = {
   outputFormat?: 'mp4' | 'mp3'; // remembered so Retry reuses the original choice
   startedAt?: number;
   updatedAt?: number;
+  revision?: number;
   queuePosition?: number; // 1-based, shown when stage === 'queued'
   chunks?: ChunkProgress[]; // per-connection breakdown (HTTP range only)
   transferMode?: 'range' | 'stream' | 'mixed';
@@ -154,6 +155,7 @@ export const MEDIA_MESSAGE = {
   DOWNLOAD: 'media/download',
   CLEAR_TAB: 'media/clear-tab',
   CANCEL: 'media/cancel',
+  CONTROL: 'media/control',
   CLEAR_DOWNLOADS: 'media/clear-downloads',
   MAIN_VIDEO_PRESENT: 'media/main-video-present',
   PRESENTATION_METADATA: 'media/presentation-metadata',
@@ -193,6 +195,10 @@ export type MediaMessage =
     }
   | { type: typeof MEDIA_MESSAGE.CLEAR_TAB; payload?: { tabId?: number } }
   | { type: typeof MEDIA_MESSAGE.CANCEL; payload: { url?: string; key?: string; intent?: 'pause' | 'cancel' } }
+  | {
+      type: typeof MEDIA_MESSAGE.CONTROL;
+      payload: { key: string; intent: 'resume' | 'retry' | 'again'; requestId?: string };
+    }
   | { type: typeof MEDIA_MESSAGE.CLEAR_DOWNLOADS; payload?: { keys?: string[] } }
   | { type: typeof MEDIA_MESSAGE.MAIN_VIDEO_PRESENT; payload: { present: boolean } }
   | {

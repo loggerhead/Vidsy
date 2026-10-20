@@ -1,12 +1,13 @@
-import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
-import { headersForFetch } from './hls-request';
 import { errorInfo, flowLog, safeUrl } from './download-log';
+import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
 import { describeDirectFile } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
+import { opfsJobName } from './opfs-job-name';
 import { prepareOutputDelivery } from './output-delivery';
 import { updateProgress } from './progress';
-import { activeAbortControllers } from './segment-fetcher';
+import { probeRangeSupport } from './range-probe';
+import { activeAbortControllers, downloadStopIntents } from './segment-fetcher';
 import {
   cancelWorkerJob,
   fetchRangesToOpfs,
@@ -15,62 +16,18 @@ import {
   readMaxConnections,
   removeOpfs,
 } from './worker-client';
+import type { RangeProbe } from './range-probe';
 import type { ProgressUpdate } from '../download_worker/messages';
 
 const MIN_SIZE_FOR_PARALLEL = 5 * 1024 * 1024; // 5 MB
 const TARGET_CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per range request
 const MAX_PARALLEL_CHUNKS = 8;
-const PROBE_TIMEOUT_MS = 10_000;
-
-type RangeProbe = {
-  supportsRange: boolean;
-  totalBytes?: number;
-  contentType: string;
-};
 
 type DownloadTransport = {
   mode: 'range' | 'stream';
   connectionLimit: number;
   totalBytes?: number;
   fallbackReason?: string;
-};
-
-const probeRangeSupport = async (
-  url: string,
-  signal: AbortSignal,
-  keyHeaders?: Record<string, string>,
-): Promise<RangeProbe> => {
-  const timeoutSignal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
-  const combinedSignal = AbortSignal.any([signal, timeoutSignal]);
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { ...headersForFetch(keyHeaders), Range: 'bytes=0-0' },
-    signal: combinedSignal,
-    credentials: 'include',
-  });
-  flowLog('http.probe.response', {
-    url: safeUrl(url),
-    status: res.status,
-    contentType: res.headers.get('content-type') ?? '',
-    contentLength: res.headers.get('content-length') ?? undefined,
-    contentRange: res.headers.get('content-range') ?? undefined,
-  });
-  await res.arrayBuffer().catch(() => undefined);
-
-  const contentType = res.headers.get('content-type') ?? '';
-  if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
-    throw new Error('URL returned HTML, not a media file');
-  }
-
-  if (res.status === 206) {
-    const contentRange = res.headers.get('content-range') ?? '';
-    const match = contentRange.match(/\/(\d+)$/);
-    const totalBytes = match ? parseInt(match[1], 10) : undefined;
-    return { supportsRange: true, totalBytes, contentType };
-  }
-  const contentLengthHeader = res.headers.get('content-length');
-  const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : undefined;
-  return { supportsRange: false, totalBytes, contentType };
 };
 
 const computeRanges = (totalBytes: number): { start: number; end: number }[] => {
@@ -90,9 +47,6 @@ const computeRanges = (totalBytes: number): { start: number; end: number }[] => 
 // resumed: the next attempt opens the SAME file that holds the bytes already
 // fetched. Across browser sessions the offscreen-doc startup GC purges the
 // file regardless, but in-session pause / resume works.
-const opfsNameFor = (key: string, tag: string, ext: string): string =>
-  `http-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}-${tag}.${ext}`;
-
 // Download a URL into OPFS, returning the resulting File + resolved content-type.
 // Picks Range-parallel when the server supports it and the payload is large enough,
 // with the streaming fallback routed through the same worker.
@@ -121,12 +75,14 @@ const downloadUrlToOpfs = async (args: {
     fallbackReason = err instanceof Error ? `Range probe failed: ${err.message}` : 'Range probe failed';
   }
 
-  const canParallelize =
-    !!probe && probe.supportsRange && probe.totalBytes !== undefined && probe.totalBytes >= MIN_SIZE_FOR_PARALLEL;
+  const canUseRanges = !!probe && probe.supportsRange && probe.totalBytes !== undefined && probe.totalBytes > 0;
 
-  if (canParallelize && probe?.totalBytes) {
+  if (canUseRanges && probe?.totalBytes) {
     try {
-      const ranges = computeRanges(probe.totalBytes);
+      const ranges =
+        probe.totalBytes < MIN_SIZE_FOR_PARALLEL
+          ? [{ start: 0, end: probe.totalBytes - 1 }]
+          : computeRanges(probe.totalBytes);
       const configuredConnections = args.maxConnections ?? (await readMaxConnections());
       const connectionLimit = Math.max(1, Math.min(configuredConnections, ranges.length));
       const transport: DownloadTransport = { mode: 'range', connectionLimit, totalBytes: probe.totalBytes };
@@ -138,6 +94,7 @@ const downloadUrlToOpfs = async (args: {
         keyHeaders: headers,
         ranges,
         totalBytes: probe.totalBytes,
+        resourceVersion: probe.resourceVersion,
         stage,
         maxConnections: connectionLimit,
         reportProgress: args.reportProgress,
@@ -159,7 +116,7 @@ const downloadUrlToOpfs = async (args: {
   } else if (!fallbackReason) {
     if (!probe?.supportsRange) fallbackReason = 'Server did not accept byte ranges';
     else if (probe.totalBytes === undefined) fallbackReason = 'Server did not report the file size';
-    else fallbackReason = 'File is smaller than 5 MB';
+    else fallbackReason = 'Source has no media bytes';
   }
 
   const transport: DownloadTransport = {
@@ -198,7 +155,7 @@ const downloadHttpDirect = async (
   activeAbortControllers.set(key, abortController);
   abortController.signal.addEventListener('abort', () => cancelWorkerJob(key));
 
-  const inputOpfsName = opfsNameFor(key, 'in', 'bin');
+  const inputOpfsName = await opfsJobName('http', key, 'in', 'bin');
   let outputOpfsName: string | null = null;
   let inputBlobUrl: string | null = null;
 
@@ -230,7 +187,7 @@ const downloadHttpDirect = async (
     if (plan.type !== 'passthrough') {
       if (plan.type === 'concatenate-fmp4') throw new Error('Unexpected concatenate plan for direct media');
       await preflightDiskSpace(totalBytes);
-      outputOpfsName = opfsNameFor(key, 'out', plan.output.container);
+      outputOpfsName = await opfsJobName('http', key, 'out', plan.output.container);
       const { jsfetchUrl, blobUrl } = await jsfetchInputForOpfs(inputOpfsName);
       inputBlobUrl = blobUrl;
       await executeMuxPlan({
@@ -242,7 +199,7 @@ const downloadHttpDirect = async (
       });
       URL.revokeObjectURL(inputBlobUrl);
       inputBlobUrl = null;
-      void removeOpfs(inputOpfsName).catch(() => undefined);
+      await removeOpfs(inputOpfsName).catch(() => undefined);
 
       const outputFile = await getOpfsFile(outputOpfsName);
       const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
@@ -261,9 +218,9 @@ const downloadHttpDirect = async (
         /* ignore */
       }
     }
-    void removeOpfs(inputOpfsName).catch(() => undefined);
+    if (downloadStopIntents.get(key) !== 'pause') await removeOpfs(inputOpfsName).catch(() => undefined);
     if (outputOpfsName && outputOpfsName !== inputOpfsName) {
-      void removeOpfs(outputOpfsName).catch(() => undefined);
+      await removeOpfs(outputOpfsName).catch(() => undefined);
     }
     throw err;
   } finally {
@@ -274,5 +231,6 @@ const downloadHttpDirect = async (
   }
 };
 
-export { downloadHttpDirect, downloadUrlToOpfs };
+const discardHttpResume = async (key: string) => removeOpfs(await opfsJobName('http', key, 'in', 'bin'));
+export { downloadHttpDirect, downloadUrlToOpfs, discardHttpResume };
 export type { DownloadTransport };

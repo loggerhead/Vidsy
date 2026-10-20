@@ -1,26 +1,25 @@
-/**
- * Helper method to check if user can click on theme button and toggle theme color
- */
-export const canSwitchTheme = async () => {
-  const LIGHT_THEME_CLASS = 'bg-slate-50';
-  const DARK_THEME_CLASS = 'bg-gray-800';
-  const TOGGLE_BUTTON_TEXT = 'Toggle theme';
+import { aiAssert } from './browser.js';
+import { expect } from 'vitest';
+import type { PlaywrightAgent } from '@midscene/web/playwright';
+import type { Page } from 'playwright';
 
-  const app = await $('.App').getElement();
-  const toggleThemeButton = await $(`button=${TOGGLE_BUTTON_TEXT}`).getElement();
+const canSwitchTheme = async (page: Page, agent: PlaywrightAgent) => {
+  const app = page.locator('.App');
+  const button = page.getByRole('button', { name: 'Toggle theme' });
+  await app.waitFor();
+  await button.waitFor();
+  const initialClasses = (await app.getAttribute('class')) ?? '';
+  const initial = initialClasses.includes('bg-slate-50') ? 'bg-slate-50' : 'bg-gray-800';
+  const next = initial === 'bg-slate-50' ? 'bg-gray-800' : 'bg-slate-50';
 
-  await expect(app).toBeExisting();
-  await expect(toggleThemeButton).toBeExisting();
+  if (process.env.VIDSY_E2E_AI === 'off') await button.click();
+  else await agent.aiTap('the Toggle theme button');
+  await expect.poll(() => app.getAttribute('class')).toContain(next);
+  await aiAssert(agent, 'The page theme changed after clicking Toggle theme');
 
-  const appClasses = await app.getAttribute('class');
-  const initialThemeClass = appClasses.includes(LIGHT_THEME_CLASS) ? LIGHT_THEME_CLASS : DARK_THEME_CLASS;
-  const afterClickThemeClass = appClasses.includes(LIGHT_THEME_CLASS) ? DARK_THEME_CLASS : LIGHT_THEME_CLASS;
-
-  // Toggle theme
-  await toggleThemeButton.click();
-  await expect(app).toHaveElementClass(afterClickThemeClass);
-
-  // Toggle back to initial theme
-  await toggleThemeButton.click();
-  await expect(app).toHaveElementClass(initialThemeClass);
+  if (process.env.VIDSY_E2E_AI === 'off') await button.click();
+  else await agent.aiTap('the Toggle theme button');
+  await expect.poll(() => app.getAttribute('class')).toContain(initial);
 };
+
+export { canSwitchTheme };

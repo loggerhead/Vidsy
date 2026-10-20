@@ -94,18 +94,20 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
       record.tracked = true;
       if (pageUrl) record.documentUrl = pageUrl;
       if (!pageReady && !record.controller) record.initialNavigationPending = true;
-      if (pageReady) await startCurrent(tabId, record);
+      if (pageReady) {
+        // A content script may report readiness while the previous document's
+        // stop callback is still running. Starting before it finishes lets the
+        // old stop remove the newly mounted UI.
+        await record.captureReady;
+        if (records.get(tabId) === record) await startCurrent(tabId, record);
+      }
     },
 
     async navigationStarted(tabId: number, pageUrl?: string) {
       await beginNavigation(tabId, pageUrl);
     },
 
-    /**
-     * webRequest can outrun tabs.onUpdated for a replacement document. Align
-     * the lifecycle from the tab's loading state before detection reads a
-     * generation, while keeping repeated response admission idempotent.
-     */
+    /** Admit a response without treating the tab's loading state as navigation. */
     async prepareCapture(tabId: number, pageLoading: boolean, pageUrl?: string) {
       const record = recordFor(tabId);
       // A response attributed by Chrome to a live tab is sufficient evidence
@@ -120,9 +122,9 @@ export const createTabWorkLifecycle = ({ start, stop }: TabWorkLifecycleOptions)
         // tabs.onUpdated(complete) notification cannot be replayed.
         if (!pageLoading) await startCurrent(tabId, record);
       }
-      const replacementUrl = Boolean(pageUrl && record.documentUrl && pageUrl !== record.documentUrl);
-      if (!pageLoading && !replacementUrl) return;
-      await beginNavigation(tabId, pageUrl);
+      // A same-document URL change can briefly report `loading`. Only
+      // webNavigation.onCommitted can establish a replacement document.
+      if (pageUrl) record.documentUrl = pageUrl;
     },
 
     async pageReady(tabId: number) {

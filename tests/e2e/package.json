@@ -1,24 +1,24 @@
 {
   "name": "@extension/e2e",
   "version": "1.1.0",
-  "description": "E2e tests configuration boilerplate",
+  "description": "Midscene + Vitest browser extension end-to-end tests",
   "private": true,
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "e2e": "wdio run config/wdio.browser.conf.ts",
+    "e2e": "vitest run --config vitest.config.ts",
     "clean:node_modules": "pnpx rimraf node_modules",
     "clean:turbo": "pnpx rimraf .turbo",
     "clean": "pnpm clean:turbo && pnpm clean:node_modules"
   },
   "devDependencies": {
-    "@extension/env": "workspace:*",
     "@extension/tsconfig": "workspace:*",
-    "@wdio/cli": "^9.14.0",
-    "@wdio/globals": "^9.14.0",
-    "@wdio/local-runner": "^9.14.0",
-    "@wdio/mocha-framework": "^9.14.0",
-    "@wdio/spec-reporter": "^9.14.0",
-    "@wdio/types": "^9.14.0"
+    "@midscene/web": "^1.16.0",
+    "@playwright/test": "^1.64.1",
+    "@types/chrome": "^0.0.323",
+    "@types/node": "^22.18.1",
+    "playwright": "^1.64.1",
+    "vite": "^6.4.4",
+    "vitest": "^5.0.5"
   }
 }

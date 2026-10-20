@@ -1,8 +1,10 @@
 // Typed RPC client around WXT's unlisted download worker (`download-worker.js`).
 // The worker owns OPFS. This module is the only place that speaks the worker protocol.
 
-import { updateProgress } from './progress';
 import { rejectPendingWorkerJobs } from './pending-worker-jobs';
+import { updateProgress } from './progress';
+import { activeAbortControllers } from './segment-fetcher';
+import type { ExecutableMuxPlan, PlanInput } from './media-processing';
 import type {
   FetchRangesRequest,
   FetchSegmentsRequest,
@@ -13,8 +15,6 @@ import type {
   WorkerRequest,
   WorkerResponse,
 } from '../download_worker/messages';
-import type { ExecutableMuxPlan, PlanInput } from './media-processing';
-import type { ChunkProgress } from '@extension/shared';
 
 // Storage is dynamically imported so its module-level createStorage calls
 // (which can throw in some offscreen contexts when chrome.storage is being
@@ -59,6 +59,7 @@ const pendingAck = new Map<string, PendingAck>();
 const pendingMux = new Map<string, PendingMux>();
 
 const rejectAllPending = (error: Error): void => {
+  worker?.terminate();
   rejectPendingWorkerJobs(error, [pendingFetch, pendingFile, pendingAck, pendingMux]);
   worker = null;
 };
@@ -71,9 +72,38 @@ const ensureListener = (): void => {
   activeWorker.addEventListener('message', (ev: MessageEvent<WorkerResponse>) => {
     const msg = ev.data;
     switch (msg.type) {
+      case 'authorize-url':
+        void chrome.runtime
+          .sendMessage({
+            type: 'offscreen/authorize-download-url',
+            payload: { key: msg.jobKey, url: msg.url, transient: true },
+          })
+          .then(
+            response => {
+              activeWorker.postMessage({
+                type: 'url-authorized',
+                authorizationId: msg.authorizationId,
+                downloadKey: response.downloadKey,
+                error: response.ok ? undefined : response.error,
+              });
+            },
+            error =>
+              activeWorker.postMessage({
+                type: 'url-authorized',
+                authorizationId: msg.authorizationId,
+                error: String(error),
+              }),
+          );
+        return;
+      case 'release-url':
+        void chrome.runtime
+          .sendMessage({ type: 'offscreen/release-download-url', payload: msg })
+          .catch(() => undefined);
+        return;
       case 'progress': {
         const { jobKey, stage, downloadedBytes, estimatedBytes, muxPercent, chunks } = msg as ProgressUpdate;
         const pending = pendingFetch.get(msg.jobId);
+        if (!pending && !pendingMux.has(msg.jobId)) return;
         pending?.onProgress?.(msg);
         if (pending?.reportProgress !== false) {
           void updateProgress(jobKey, { stage, downloadedBytes, estimatedBytes, muxPercent, chunks });
@@ -144,16 +174,19 @@ const ensureListener = (): void => {
     }
   });
   activeWorker.addEventListener('error', event => {
+    if (worker !== activeWorker) return;
     listenerWorker = null;
     rejectAllPending(new Error(event.message || 'Download worker terminated unexpectedly'));
   });
   activeWorker.addEventListener('messageerror', () => {
+    if (worker !== activeWorker) return;
     listenerWorker = null;
     rejectAllPending(new Error('Download worker returned an unreadable message'));
   });
 };
 
 const send = (req: WorkerRequest): void => {
+  if ('jobKey' in req && req.type !== 'cancel') activeAbortControllers.get(req.jobKey)?.signal.throwIfAborted();
   ensureListener();
   getWorker().postMessage(req);
 };
@@ -163,6 +196,7 @@ const fetchSegmentsToOpfs = (args: {
   opfsName: string;
   segments: SegmentSpec[];
   initUrl?: string;
+  initRange?: { start: number; end: number };
   keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
 }): Promise<{ opfsName: string; totalBytes: number }> =>
@@ -176,36 +210,6 @@ const fetchSegmentsToOpfs = (args: {
     const req: FetchSegmentsRequest = { type: 'fetch-segments', jobId, ...args };
     send(req);
   });
-
-// Look up any prior chunk state for this jobKey so the worker can skip
-// chunks that already completed in a paused / interrupted previous run.
-// We only resume if the ranges match (same file, same chunking strategy);
-// otherwise the OPFS bytes would belong to a different layout.
-const findResumeChunks = async (
-  jobKey: string,
-  ranges: { start: number; end: number }[],
-  totalBytes: number,
-): Promise<ChunkProgress[] | undefined> => {
-  try {
-    const { mediaDownloadsStorage } = await import('@extension/storage');
-    const all = await mediaDownloadsStorage.get();
-    const prior = all[jobKey];
-    if (!prior?.chunks?.length) return undefined;
-    if (prior.estimatedBytes !== totalBytes) return undefined;
-    if (prior.chunks.length !== ranges.length) return undefined;
-    // Reject if ANY range boundary disagrees with the prior state — chunking
-    // is deterministic for a given totalBytes but defense in depth.
-    for (let i = 0; i < ranges.length; i++) {
-      const r = ranges[i];
-      const p = prior.chunks[i];
-      if (!p || p.i !== i || p.start !== r.start || p.end !== r.end) return undefined;
-    }
-    const done = prior.chunks.filter(c => c.status === 'done');
-    return done.length > 0 ? done : undefined;
-  } catch {
-    return undefined;
-  }
-};
 
 const readMaxConnections = async (): Promise<number> => {
   try {
@@ -224,6 +228,7 @@ const fetchRangesToOpfs = (args: {
   keyHeaders?: Record<string, string>;
   ranges: { start: number; end: number }[];
   totalBytes: number;
+  resourceVersion?: string;
   stage: 'download-video' | 'download-audio';
   maxConnections?: number;
   onProgress?: (progress: ProgressUpdate) => void;
@@ -237,8 +242,8 @@ const fetchRangesToOpfs = (args: {
       onProgress: args.onProgress,
       reportProgress: args.reportProgress !== false,
     });
-    void Promise.all([findResumeChunks(args.jobKey, args.ranges, args.totalBytes), readMaxConnections()]).then(
-      ([resumeChunks, configuredMaxConnections]) => {
+    void readMaxConnections()
+      .then(configuredMaxConnections => {
         const maxConnections = Math.max(1, Math.min(16, Math.floor(args.maxConnections ?? configuredMaxConnections)));
         const req: FetchRangesRequest = {
           type: 'fetch-ranges',
@@ -250,12 +255,15 @@ const fetchRangesToOpfs = (args: {
           ranges: args.ranges,
           totalBytes: args.totalBytes,
           stage: args.stage,
-          resumeChunks,
+          resourceVersion: args.resourceVersion,
           maxConnections,
         };
         send(req);
-      },
-    );
+      })
+      .catch(error => {
+        pendingFetch.delete(jobId);
+        reject(error);
+      });
   });
 
 const fetchUrlToOpfs = (args: {
@@ -320,7 +328,6 @@ const pingDownloadWorker = (timeoutMs = 5_000): Promise<void> =>
   new Promise((resolve, reject) => {
     ensureListener();
     const activeWorker = getWorker();
-    let timeout: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
       if (timeout) clearTimeout(timeout);
@@ -339,7 +346,7 @@ const pingDownloadWorker = (timeoutMs = 5_000): Promise<void> =>
 
     activeWorker.addEventListener('message', onMessage);
     activeWorker.addEventListener('error', onError, { once: true });
-    timeout = setTimeout(() => {
+    const timeout = setTimeout(() => {
       cleanup();
       reject(new Error(`Download worker did not respond within ${timeoutMs}ms`));
     }, timeoutMs);

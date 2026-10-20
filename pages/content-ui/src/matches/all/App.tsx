@@ -230,6 +230,8 @@ const App = () => {
         const response = await chrome.runtime.sendMessage(
           buildDownloadMessage(item, variant, tabId, settings?.enableHlsMerging),
         );
+        if (response?.ok && response.key) setBusyUrl(response.key);
+        else setBusyUrl(null);
         log.debug('download.response', {
           itemId: item.id,
           ok: response?.ok,
@@ -252,7 +254,7 @@ const App = () => {
   useEffect(() => {
     if (!busyUrl) return undefined;
     const prog = downloads[busyUrl];
-    if (prog?.stage === 'success' || prog?.stage === 'failed') {
+    if (prog && ['success', 'failed', 'cancelled', 'paused'].includes(prog.stage)) {
       const t = setTimeout(() => setBusyUrl(null), 2000);
       return () => clearTimeout(t);
     }
@@ -309,9 +311,11 @@ const App = () => {
   }, [primary?.id]);
 
   if (!effectiveVideo || !primary) return interceptModal;
-  const currentProgress = downloads[primary.id];
+  const currentProgress = Object.values(downloads)
+    .filter(entry => entry.item?.id === primary.id)
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
   const hasActiveProgress = !!currentProgress && ACTIVE_STAGES.has(currentProgress.stage);
-  const isBusy = hasActiveProgress || busyUrl === primary.id;
+  const isBusy = hasActiveProgress || busyUrl === primary.id || (!!busyUrl && currentProgress?.key === busyUrl);
   const prog = isBusy ? (currentProgress ?? null) : null;
   const rows = buildRows([primary]);
   const bestVariant = primary.variants?.length ? pickBestVariant(primary.variants) : undefined;

@@ -25,11 +25,14 @@ test('preserves the selected adaptive variant when the content overlay starts a 
 
   const selectedOption = buildRows([item])[0];
 
-  assert.deepEqual(buildDownloadMessage(selectedOption.item, selectedOption.variant, 42, true), {
+  const message = buildDownloadMessage(selectedOption.item, selectedOption.variant, 42, true);
+  assert.notEqual(message.payload.key, item.id);
+  assert.notEqual(message.payload.key, buildDownloadMessage(item, variant, 42, true).payload.key);
+  assert.deepEqual(message, {
     type: 'media/download',
     payload: {
       url: 'https://media.example/video-720p60.webm',
-      key: 'youtube',
+      key: message.payload.key,
       kind: 'video',
       fileName: undefined,
       title: 'Example',
@@ -37,7 +40,7 @@ test('preserves the selected adaptive variant when the content overlay starts a 
       outputFormat: 'mp4',
       audioUrl: 'https://media.example/audio-opus.webm',
       audioMimeType: 'audio/webm; codecs="opus"',
-      item,
+      item: { ...item, url: variant.url, mimeType: variant.mimeType, resolution: variant.resolution },
     },
   });
 });

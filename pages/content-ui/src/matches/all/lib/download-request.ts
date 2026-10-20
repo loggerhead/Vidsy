@@ -10,9 +10,9 @@ export const buildDownloadMessage = (
   type: MEDIA_MESSAGE.DOWNLOAD,
   payload: {
     url: variant?.url ?? item.url,
-    // The selected URL can change when detection authority refreshes signed
-    // CDN URLs. The media item id is stable for the lifetime of the job.
-    key: item.id,
+    // A new user action is an independent request. The media item id remains
+    // in the snapshot so the UI can relate progress back to its source.
+    key: crypto.randomUUID(),
     kind: item.kind,
     fileName: item.fileName,
     title: item.title,
@@ -20,6 +20,11 @@ export const buildDownloadMessage = (
     outputFormat: enableHlsMerging ? (item.kind === 'audio' ? 'mp3' : 'mp4') : undefined,
     audioUrl: variant?.audioUrl ?? item.audioUrl,
     audioMimeType: variant?.audioMimeType ?? item.audioMimeType,
-    item,
+    item: {
+      ...item,
+      url: variant?.url ?? item.url,
+      mimeType: variant?.mimeType ?? item.mimeType,
+      resolution: variant?.resolution ?? item.resolution,
+    },
   },
 });

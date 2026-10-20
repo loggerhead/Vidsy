@@ -47,6 +47,32 @@ test('unseen or ambiguous asset never selects a different video', () => {
   assert.equal(resolvePlayerMedia([item('100'), { ...item('100'), id: 'duplicate' }], evidence('100')), undefined);
 });
 
+test('X video and audio rendition playlists for one poster become download choices', () => {
+  const id = '2101667014213611520';
+  const base = item(id);
+  const playlist = (name: string, suffix: string): MediaItem => ({
+    ...base,
+    id: name,
+    url: `https://video.twimg.com/amplify_video/${id}/pl/${suffix}`,
+    variants: undefined,
+  });
+  const items = [
+    playlist('1080', 'avc1/1920x1080/hi.m3u8'),
+    playlist('audio', 'mp4a/32000/audio.m3u8'),
+    playlist('270', 'avc1/480x270/low.m3u8'),
+    playlist('other', 'avc1/3840x2160/ultra.m3u8'),
+  ];
+  const resolved = resolvePlayerMedia(items, evidence(id));
+  assert.equal(resolved?.authority, 'poster');
+  assert.equal(resolved?.item.variants?.length, 3);
+  assert.equal(resolved?.item.variants?.[0].resolution?.height, 2160);
+  for (const row of buildRows([resolved!.item])) {
+    const request = buildDownloadMessage(row.item, row.variant, 1, true);
+    assert.ok(request.payload.url.includes(`/${id}/pl/avc1/`));
+    assert.ok(request.payload.audioUrl?.includes(`/${id}/pl/mp4a/`));
+  }
+});
+
 test('direct and child playlist sources resolve without provider-specific assumptions', () => {
   const target = {
     ...item('100'),
@@ -74,6 +100,29 @@ test('single-player pages retain a unique same-page presentation; multiple candi
   assert.equal(resolvePlayerMedia([item('100'), item('200')], player), undefined);
   assert.equal(resolvePlayerMedia([item('100')], { ...player, pageUrl: 'https://example.com/other' })?.item.id, '100');
   assert.equal(resolvePlayerMedia([item('100')], { ...player, playerCount: 2 }), undefined);
+});
+
+test('Bilibili blob player resolves its uniquely paired video and audio tracks', () => {
+  const paired: MediaItem = {
+    ...item('bili'),
+    kind: 'video',
+    variants: undefined,
+    url: 'https://cdn.example/video.m4s',
+    audioUrl: 'https://cdn.example/audio.m4s',
+    pageUrl: 'https://www.bilibili.com/video/BV1j5nj68E48/',
+  };
+  const player = {
+    sourceUrls: ['blob:https://www.bilibili.com/local'],
+    posterUrl: '',
+    pageUrl: 'https://www.bilibili.com/video/BV1j5nj68E48/?vd_source=abc',
+    playerCount: 1,
+  };
+  assert.equal(resolvePlayerMedia([paired], player)?.item, paired);
+  assert.equal(resolvePlayerMedia([paired, { ...paired, id: 'second' }], player), undefined);
+  assert.equal(
+    resolvePlayerMedia([paired], { ...player, pageUrl: 'https://www.bilibili.com/video/BVother' }),
+    undefined,
+  );
 });
 
 test('cross-origin iframe player can use the tab-level unique presentation fallback', () => {

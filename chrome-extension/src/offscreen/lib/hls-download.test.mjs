@@ -1,5 +1,9 @@
+import process from 'node:process';
+import { File } from 'node:buffer';
+import { URL } from 'node:url';
+const { Response } = globalThis;
 // Run with: node --import tsx --experimental-test-module-mocks --test <this file>
-// Fixtures: tools/media-remux/generate-fixtures.sh /tmp/vidsy-web-media-remux/fixtures-full
+// Prepare first: node tools/media-remux/prepare-test-media.mjs
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +11,8 @@ import test, { mock } from 'node:test';
 
 const enabled = process.execArgv.includes('--experimental-test-module-mocks');
 test('HLS download orchestration preserves separate tracks and validates delivery', { skip: !enabled }, async t => {
-  const root = process.env.VIDSY_MEDIA_FIXTURES ?? '/tmp/vidsy-web-media-remux/fixtures-full';
+  const root =
+    process.env.VIDSY_MEDIA_FIXTURES ?? path.resolve(import.meta.dirname, '../../../../.media-test/fixtures');
   const video = await readFile(path.join(root, 'separate-video.mp4'));
   const audio = await readFile(path.join(root, 'separate-audio.m4a'));
   const combined = await readFile(path.join(root, 'direct.mp4'));

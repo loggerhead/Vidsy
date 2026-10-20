@@ -6,13 +6,13 @@ import type { MediaHistoryItem } from '@extension/shared';
 
 const ITEMS_PER_PAGE = 5;
 
-export const getPageFromUrl = (): number => {
+const getPageFromUrl = (): number => {
   const params = new URLSearchParams(window.location.search);
   const p = parseInt(params.get('page') ?? '1', 10);
   return isFinite(p) && p > 0 ? p : 1;
 };
 
-export const setPageInUrl = (page: number) => {
+const setPageInUrl = (page: number) => {
   const url = new URL(window.location.href);
   url.searchParams.set('page', String(page));
   window.history.replaceState(null, '', url.toString());
@@ -124,7 +124,7 @@ const PaginationBtn = ({
   </button>
 );
 
-export const HistoryPanel = ({ isLight }: { isLight: boolean }) => {
+const HistoryPanel = ({ isLight }: { isLight: boolean }) => {
   const history = useStorage(mediaHistoryStorage);
   const items = Array.isArray(history) ? (history as MediaHistoryItem[]) : [];
   const [page, setPage] = useState(getPageFromUrl);
@@ -158,7 +158,7 @@ export const HistoryPanel = ({ isLight }: { isLight: boolean }) => {
         {items.length > 0 && (
           <button
             onClick={() => {
-              mediaHistoryStorage.set([]);
+              void chrome.runtime.sendMessage({ type: 'media/clear-history' });
               goTo(1);
             }}
             className={cn(
@@ -304,3 +304,5 @@ export const HistoryPanel = ({ isLight }: { isLight: boolean }) => {
     </div>
   );
 };
+
+export { getPageFromUrl, setPageInUrl, HistoryPanel };
