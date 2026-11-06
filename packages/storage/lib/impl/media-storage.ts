@@ -61,6 +61,9 @@ type MediaDownloadProgress = {
   downloadedBytes: number;
   estimatedBytes?: number;
   muxPercent?: number;
+  activity?: 'waiting-network' | 'receiving' | 'retrying' | 'waiting-mux' | 'verifying';
+  completedParts?: number;
+  totalParts?: number;
   error?: string;
   downloadId?: number;
   item?: MediaItem;

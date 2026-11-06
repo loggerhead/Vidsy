@@ -20,8 +20,7 @@ import type { RangeProbe } from './range-probe';
 import type { ProgressUpdate } from '../download_worker/messages';
 
 const MIN_SIZE_FOR_PARALLEL = 5 * 1024 * 1024; // 5 MB
-const TARGET_CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per range request
-const MAX_PARALLEL_CHUNKS = 8;
+const TARGET_CHUNK_SIZE = 4 * 1024 * 1024; // Bounded payload independent of file size.
 
 type DownloadTransport = {
   mode: 'range' | 'stream';
@@ -31,7 +30,7 @@ type DownloadTransport = {
 };
 
 const computeRanges = (totalBytes: number): { start: number; end: number }[] => {
-  const chunkCount = Math.min(Math.ceil(totalBytes / TARGET_CHUNK_SIZE), MAX_PARALLEL_CHUNKS * 8);
+  const chunkCount = Math.ceil(totalBytes / TARGET_CHUNK_SIZE);
   const chunkSize = Math.ceil(totalBytes / chunkCount);
   const ranges: { start: number; end: number }[] = [];
   for (let i = 0; i < chunkCount; i++) {
@@ -202,12 +201,12 @@ const downloadHttpDirect = async (
       await removeOpfs(inputOpfsName).catch(() => undefined);
 
       const outputFile = await getOpfsFile(outputOpfsName);
-      const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
+      const delivery = await prepareOutputDelivery({ jobKey: key, file: outputFile, opfsName: outputOpfsName, plan });
       return delivery;
     }
 
     outputOpfsName = inputOpfsName;
-    const delivery = await prepareOutputDelivery({ file: inputFile, opfsName: outputOpfsName, plan });
+    const delivery = await prepareOutputDelivery({ jobKey: key, file: inputFile, opfsName: outputOpfsName, plan });
     return delivery;
   } catch (err) {
     flowLog('http.failed', { url: safeUrl(url), error: errorInfo(err) });

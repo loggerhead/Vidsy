@@ -1,6 +1,7 @@
 import 'webextension-polyfill';
 import { cleanupBlob } from './lib/blob-cleanup';
 import { downloadDashMuxed } from './lib/dash-download';
+import { setDownloadDiagnosticReporter } from './lib/download-log';
 import { createExecutionRegistry } from './lib/execution-registry';
 import { downloadHlsMuxed } from './lib/hls-download';
 import { downloadHttpDirect, discardHttpResume } from './lib/http-download';
@@ -22,6 +23,12 @@ let started = false;
 export const startOffscreen = (): void => {
   if (started) return;
   started = true;
+
+  setDownloadDiagnosticReporter((event, data) => {
+    void chrome.runtime
+      .sendMessage({ type: 'offscreen/download-diagnostic', payload: { event, data } })
+      .catch(() => undefined);
+  });
 
   const storageReady = purgeOpfsOrphans().then(({ removed, failed }) => {
     if (removed > 0 || failed > 0) {

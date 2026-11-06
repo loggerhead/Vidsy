@@ -74,3 +74,32 @@ test('cancel intent survives a stop before asynchronous execution starts', async
   registry.progress(command.requestId, { stage: 'download-video', downloadedBytes: 100 });
   assert.equal(registry.inventory()[0].report.type, 'cancelled');
 });
+
+test('retries an unacknowledged terminal report without re-executing the download', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let executions = 0,
+    terminalAttempts = 0;
+  const registry = createExecutionRegistry({
+    execute: async () => {
+      executions++;
+      return output;
+    },
+    stop: async () => {},
+    publish: async report => {
+      if (report.type === 'output' && ++terminalAttempts === 1) throw new Error('Background unavailable');
+    },
+  });
+  registry.start(command);
+  const drain = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+  await drain();
+  t.mock.timers.tick(0);
+  await drain();
+  assert.equal(terminalAttempts, 1);
+  t.mock.timers.tick(1000);
+  await drain();
+  assert.equal(terminalAttempts, 2);
+  assert.equal(executions, 1);
+  registry.forget(command.executionId);
+});

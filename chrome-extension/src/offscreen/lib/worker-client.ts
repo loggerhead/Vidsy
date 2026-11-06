@@ -7,7 +7,6 @@ import { activeAbortControllers } from './segment-fetcher';
 import type { ExecutableMuxPlan, PlanInput } from './media-processing';
 import type {
   FetchRangesRequest,
-  FetchSegmentsRequest,
   FetchUrlRequest,
   MuxRequest,
   ProgressUpdate,
@@ -72,6 +71,9 @@ const ensureListener = (): void => {
   activeWorker.addEventListener('message', (ev: MessageEvent<WorkerResponse>) => {
     const msg = ev.data;
     switch (msg.type) {
+      case 'diagnostic':
+        void chrome.runtime.sendMessage({ type: 'offscreen/download-diagnostic', payload: msg }).catch(() => undefined);
+        return;
       case 'authorize-url':
         void chrome.runtime
           .sendMessage({
@@ -84,6 +86,7 @@ const ensureListener = (): void => {
                 type: 'url-authorized',
                 authorizationId: msg.authorizationId,
                 downloadKey: response.downloadKey,
+                url: response.url,
                 error: response.ok ? undefined : response.error,
               });
             },
@@ -101,12 +104,31 @@ const ensureListener = (): void => {
           .catch(() => undefined);
         return;
       case 'progress': {
-        const { jobKey, stage, downloadedBytes, estimatedBytes, muxPercent, chunks } = msg as ProgressUpdate;
+        const {
+          jobKey,
+          stage,
+          downloadedBytes,
+          estimatedBytes,
+          muxPercent,
+          chunks,
+          activity,
+          completedParts,
+          totalParts,
+        } = msg as ProgressUpdate;
         const pending = pendingFetch.get(msg.jobId);
         if (!pending && !pendingMux.has(msg.jobId)) return;
         pending?.onProgress?.(msg);
         if (pending?.reportProgress !== false) {
-          void updateProgress(jobKey, { stage, downloadedBytes, estimatedBytes, muxPercent, chunks });
+          void updateProgress(jobKey, {
+            stage,
+            downloadedBytes,
+            estimatedBytes,
+            muxPercent,
+            chunks,
+            activity,
+            completedParts,
+            totalParts,
+          });
         }
         return;
       }
@@ -207,8 +229,14 @@ const fetchSegmentsToOpfs = (args: {
       reject,
       reportProgress: true,
     });
-    const req: FetchSegmentsRequest = { type: 'fetch-segments', jobId, ...args };
-    send(req);
+    void readMaxConnections()
+      .then(maxConnections => {
+        send({ type: 'fetch-segments', jobId, ...args, maxConnections });
+      })
+      .catch(error => {
+        pendingFetch.delete(jobId);
+        reject(error);
+      });
   });
 
 const readMaxConnections = async (): Promise<number> => {

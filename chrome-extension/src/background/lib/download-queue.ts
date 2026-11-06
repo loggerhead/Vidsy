@@ -1,5 +1,5 @@
 import { createDownloadRuntime } from './download-runtime';
-import { findCapturedHeaders } from './header-capture';
+import { findDownloadHeaders, waitForCapturedHeaders } from './header-capture';
 import { clearProgress, updateProgress } from './progress';
 import { mediaSettingsStorage } from '@extension/storage';
 import type {
@@ -137,6 +137,7 @@ const publishSubmission = async (result: { jobId: string; duplicate: boolean }, 
 };
 
 const enqueueDownload = async (payload: DownloadPayload, item: MediaItem) => {
+  await waitForCapturedHeaders();
   const requestId = payload.key ?? crypto.randomUUID();
   const itemSnapshot: MediaItem = {
     ...structuredClone(item),
@@ -158,10 +159,10 @@ const enqueueDownload = async (payload: DownloadPayload, item: MediaItem) => {
       audioUrl: payload.audioUrl,
       audioMimeType: payload.audioMimeType,
       item: itemSnapshot,
-      headers: item.tabId === undefined ? undefined : findCapturedHeaders(payload.url, payload.key, item.tabId),
+      headers: item.tabId === undefined ? undefined : findDownloadHeaders(payload.url, item.tabId, item.pageUrl),
       audioHeaders:
         payload.audioUrl && item.tabId !== undefined
-          ? findCapturedHeaders(payload.audioUrl, undefined, item.tabId)
+          ? findDownloadHeaders(payload.audioUrl, item.tabId, item.pageUrl)
           : undefined,
     },
     display: { title: item.title, itemId: item.id, pageUrl: item.pageUrl, tabId: item.tabId },

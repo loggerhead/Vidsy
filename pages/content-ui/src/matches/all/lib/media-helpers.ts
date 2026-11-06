@@ -27,8 +27,20 @@ export const describeProgress = (progress?: {
   estimatedBytes?: number;
   muxPercent?: number;
   queuePosition?: number;
+  activity?: string;
 }): string => {
   if (!progress) return 'Starting';
+  const terminal: Record<string, string> = {
+    failed: 'Failed',
+    success: 'Done',
+    paused: 'Paused',
+    cancelled: 'Cancelled',
+  };
+  if (terminal[progress.stage]) return terminal[progress.stage];
+  if (progress.activity === 'waiting-mux') return 'Mux queued';
+  if (progress.activity === 'waiting-network') return 'Waiting';
+  if (progress.activity === 'retrying') return 'Retrying';
+  if (progress.activity === 'verifying') return 'Checking';
   if (progress.stage === 'queued') {
     return progress.queuePosition && progress.queuePosition > 1 ? `Queued #${progress.queuePosition}` : 'Queued';
   }
@@ -37,7 +49,7 @@ export const describeProgress = (progress?: {
   if (progress.stage === 'finalize') return 'Saving';
   if (progress.estimatedBytes && progress.estimatedBytes > 0) {
     const pct = Math.min(99, Math.floor(((progress.downloadedBytes ?? 0) / progress.estimatedBytes) * 100));
-    return `${pct}%`;
+    return `${progress.stage === 'download-audio' ? 'Audio ' : ''}${pct}%`;
   }
   if (progress.downloadedBytes && progress.downloadedBytes > 0) return formatBytes(progress.downloadedBytes);
   if (progress.stage === 'download-audio') return 'Audio';

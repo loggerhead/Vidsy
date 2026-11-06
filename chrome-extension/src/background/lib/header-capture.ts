@@ -10,6 +10,42 @@ type CapturedRequestHeaders = {
 const capturedRequestHeaders = new Map<string, CapturedRequestHeaders>();
 const captureHeaders = (url: string, tabId: number, headers: Record<string, string>) => {
   capturedRequestHeaders.set(`${tabId}:${url}`, { url, timestamp: Date.now(), tabId, headers });
+  if (capturedRequestHeaders.size > 128) {
+    const oldest = [...capturedRequestHeaders].sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+    capturedRequestHeaders.delete(oldest[0]);
+  }
+  persistCapturedHeaders();
+};
+let captureReady: Promise<void> = Promise.resolve();
+let captureTimer: ReturnType<typeof setTimeout> | undefined;
+const CAPTURE_STATE_KEY = 'vidsy-captured-request-context';
+const persistCapturedHeaders = () => {
+  if (captureTimer || !globalThis.chrome?.storage?.session) return;
+  captureTimer = setTimeout(() => {
+    captureTimer = undefined;
+    const newest = [...capturedRequestHeaders.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 128);
+    void chrome.storage.session.set({ [CAPTURE_STATE_KEY]: newest }).catch(() => undefined);
+  }, 1000);
+};
+const waitForCapturedHeaders = () => captureReady;
+const freshestUrl = (url: string, tabId?: number): string => {
+  const target = new URL(url);
+  const newest = [...capturedRequestHeaders.values()]
+    .filter(entry => {
+      try {
+        const candidate = new URL(entry.url);
+        return (
+          (tabId === undefined || entry.tabId === tabId) &&
+          candidate.origin === target.origin &&
+          candidate.pathname === target.pathname &&
+          Date.now() - entry.timestamp < 10 * 60_000
+        );
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  return newest?.url ?? url;
 };
 let shouldCaptureTab: (tabId: number) => boolean = () => true;
 
@@ -39,6 +75,21 @@ const filterCapturedHeaders = (headers: chrome.webRequest.HttpHeader[]) => {
 };
 
 const setupHeaderCapture = () => {
+  const pending = new Map<string, CapturedRequestHeaders>();
+  if (globalThis.chrome?.storage?.session)
+    captureReady = chrome.storage.session
+      .get(CAPTURE_STATE_KEY)
+      .then(result => {
+        for (const entry of result[CAPTURE_STATE_KEY] ?? []) {
+          if (
+            Date.now() - entry.timestamp < 10 * 60_000 &&
+            shouldCaptureTab(entry.tabId) &&
+            !capturedRequestHeaders.has(`${entry.tabId}:${entry.url}`)
+          )
+            capturedRequestHeaders.set(`${entry.tabId}:${entry.url}`, entry);
+        }
+      })
+      .catch(() => undefined);
   chrome.webRequest.onSendHeaders.addListener(
     details => {
       if (
@@ -49,11 +100,29 @@ const setupHeaderCapture = () => {
         return;
       const headers = filterCapturedHeaders(details.requestHeaders);
       if (Object.keys(headers).length > 0) {
-        captureHeaders(details.url, details.tabId, headers);
+        pending.set(details.requestId, { url: details.url, tabId: details.tabId, timestamp: Date.now(), headers });
+        if (pending.size > 256) pending.delete(pending.keys().next().value!);
       }
     },
     { urls: ['<all_urls>'], types: ['xmlhttprequest', 'media', 'other'] },
     ['requestHeaders', 'extraHeaders'],
+  );
+  // A failed unauthenticated probe must not overwrite the last working
+  // context. Headers are committed when the response headers prove success.
+  chrome.webRequest.onResponseStarted.addListener(
+    details => {
+      const entry = pending.get(details.requestId);
+      pending.delete(details.requestId);
+      if (entry && details.statusCode >= 200 && details.statusCode < 400 && shouldCaptureTab(entry.tabId))
+        captureHeaders(entry.url, entry.tabId, entry.headers);
+    },
+    { urls: ['<all_urls>'], types: ['xmlhttprequest', 'media', 'other'] },
+  );
+  chrome.webRequest.onErrorOccurred.addListener(
+    details => {
+      pending.delete(details.requestId);
+    },
+    { urls: ['<all_urls>'] },
   );
 };
 
@@ -91,6 +160,31 @@ const findCapturedHeaders = (url: string, fallbackKey?: string, tabId?: number):
 const clearCapturedHeadersForTab = (tabId: number) => {
   for (const [url, captured] of capturedRequestHeaders) {
     if (captured.tabId === tabId) capturedRequestHeaders.delete(url);
+  }
+  persistCapturedHeaders();
+};
+
+// Provider-extracted renditions have not necessarily been played, so there may
+// be no captured request for their exact URL. Bilibili's signed media URLs still
+// require the public page origin as Referer. Do not borrow cookies or tokens
+// from a different rendition, CDN host, or tab to supply this context.
+const findDownloadHeaders = (url: string, tabId: number, pageUrl?: string): Record<string, string> | undefined => {
+  const captured = findCapturedHeaders(url, undefined, tabId);
+  try {
+    const page = new URL(pageUrl ?? '');
+    const target = new URL(url);
+    if (
+      page.origin !== 'https://www.bilibili.com' ||
+      !/^\/video\/BV[A-Za-z0-9]+\/?$/.test(page.pathname) ||
+      target.protocol !== 'https:' ||
+      !['bilivideo.com', 'bilivideo.cn'].some(domain => target.hostname.endsWith(`.${domain}`))
+    )
+      return captured;
+    const headers = { ...captured };
+    if (!Object.keys(headers).some(name => name.toLowerCase() === 'referer')) headers.Referer = `${page.origin}/`;
+    return headers;
+  } catch {
+    return captured;
   }
 };
 
@@ -190,10 +284,8 @@ const injectHeaders = async (
       urls.add(cdnUrl);
       persistentUrls.set(downloadKey, urls);
     }
-    if (rulesByHost.has(cdnUrl)) {
-      await persistDnrState();
-      return;
-    }
+    // Refresh rules too: a previous failed request may have stale context.
+    const priorRuleId = rulesByHost.get(cdnUrl);
     const requestHeaders = headersForDnr(headers);
 
     if (requestHeaders.length === 0) return;
@@ -220,7 +312,7 @@ const injectHeaders = async (
           },
         },
       ],
-      removeRuleIds: [ruleId],
+      removeRuleIds: priorRuleId === undefined ? [ruleId] : [priorRuleId, ruleId],
     });
 
     rulesByHost.set(cdnUrl, ruleId);
@@ -244,17 +336,20 @@ const authorizeUrlForDownload = (downloadKey: string, url: string, transient = f
   mutateRules(async () => {
     await restoreDnrState();
     const headers = activeDownloadHeaders.get(downloadKey);
-    if (!headers) return;
+    if (!headers) return url;
+    await waitForCapturedHeaders();
     const source = downloadSources.get(downloadKey);
+    url = freshestUrl(url, source?.tabId);
     const targetHeaders =
       new URL(url).origin === source?.origin
-        ? headers
+        ? (findCapturedHeaders(url, undefined, source?.tabId) ?? headers)
         : source?.tabId === undefined
           ? undefined
           : findCapturedHeaders(url, undefined, source.tabId);
     // A manifest naming a third party is not authority to forward source cookies
     // or bearer tokens there. Only a captured request for that target can grant it.
     if (targetHeaders) await injectHeaders(url, targetHeaders, downloadKey, source?.tabId, transient);
+    return url;
   });
 
 const releaseUrlForDownload = (downloadKey: string, url: string) =>
@@ -334,9 +429,11 @@ export {
   captureHeaders,
   configureHeaderCaptureTabFilter,
   findCapturedHeaders,
+  findDownloadHeaders,
   clearCapturedHeadersForTab,
   headersForDnr,
   setupHeaderCapture,
+  waitForCapturedHeaders,
   injectHeadersForDownload,
   authorizeUrlForDownload,
   releaseUrlForDownload,

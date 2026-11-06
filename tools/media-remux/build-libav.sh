@@ -60,6 +60,16 @@ for series_file in "$source_dir/patches/ffmpeg/series8"; do
   fi
 done
 
+mkdir -p "$source_dir/build"
+patch_digest="$(shasum -a 256 "$jsfetch_patch" | cut -d ' ' -f 1)"
+patch_stamp="$source_dir/build/vidsy-jsfetch-patch.sha256"
+if [[ -d "$source_dir/build/ffmpeg-8.0" && "$(cat "$patch_stamp" 2>/dev/null || true)" != "$patch_digest" ]]; then
+  # This directory is generated from the pinned archive; keep dependencies and
+  # archives cached, but never link FFmpeg objects built with an old ABI patch.
+  rm -rf -- "$source_dir/build/ffmpeg-8.0"
+fi
+printf '%s\n' "$patch_digest" > "$patch_stamp"
+
 libxml2_archive="$source_dir/build/libxml2-$libxml2_version.tar.xz"
 libxml2_source="$source_dir/build/libxml2-$libxml2_version"
 install_prefix="$source_dir/build/inst/base"
@@ -138,7 +148,7 @@ config_json="$(tr -d '\n' < "$config_file")"
 
 (
   cd "$source_dir"
-  make \
+  make -j "${LIBAVJS_JOBS:-4}" \
     "dist/libav-$libav_version-$variant.mjs" \
     "dist/libav-$libav_version-$variant.wasm.mjs"
 )

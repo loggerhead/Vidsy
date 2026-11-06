@@ -18,6 +18,7 @@ import {
   clearDownloads,
   handleExecutionReport,
 } from './lib/download';
+import { recordDownloadDiagnostic } from './lib/download-diagnostics';
 import { setupDownloadInterceptor, resumeBrowserDownload, openDownloadsWindow } from './lib/download-interceptor';
 import { reorderQueueItem, runtime as downloadRuntime } from './lib/download-queue';
 import {
@@ -181,6 +182,11 @@ export const startBackground = (): void => {
         sendResponse({ ok: true });
         return;
       }
+      if (message.type === 'offscreen/download-diagnostic') {
+        recordDownloadDiagnostic(message.payload.event, message.payload.data);
+        sendResponse({ ok: true });
+        return;
+      }
       if (message.type === 'offscreen/execution-event') {
         await handleExecutionReport(message.payload);
         sendResponse({ ok: true });
@@ -192,8 +198,8 @@ export const startBackground = (): void => {
           sendResponse({ ok: false, error: 'Download cancelled' });
           return;
         }
-        await authorizeUrlForDownload(job.executionId, message.payload.url, message.payload.transient);
-        sendResponse({ ok: true, downloadKey: job.executionId });
+        const url = await authorizeUrlForDownload(job.executionId, message.payload.url, message.payload.transient);
+        sendResponse({ ok: true, downloadKey: job.executionId, url });
         return;
       }
       if (message.type === 'offscreen/release-download-url') {

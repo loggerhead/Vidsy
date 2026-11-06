@@ -38,3 +38,6 @@ midscene_run/
 
 # Reproducible media test fixtures and outputs
 .media-test/
+
+# Local libav sources and compiler toolchain
+/.cache/

@@ -1,4 +1,9 @@
-import { applyPresentationMetadata, reconcilePlayerEvidence, selectRicherVariants } from './detection-evidence';
+import {
+  applyPresentationMetadata,
+  reconcilePlayerEvidence,
+  selectRicherVariants,
+  sameMainPlayerSession,
+} from './detection-evidence';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { MediaItem } from '@extension/shared';
@@ -99,6 +104,57 @@ test('fetchable evidence does not guess between multiple MSE players on one page
   assert.deepEqual(result.items, [first, second]);
 });
 
+test('audio arriving after a network video and MSE leaves exactly one complete download', () => {
+  const mse = item({ id: 'mse', url: 'mse:https://example.com/watch#vidsy-player=1', kind: 'mse' });
+  const video = item({ id: 'network', source: 'network', url: 'https://cdn.example/video.m4s' });
+  const paired = { ...video, audioUrl: 'https://cdn.example/audio.m4s' };
+  for (const items of [
+    [video, mse],
+    [mse, video],
+  ]) {
+    const result = reconcilePlayerEvidence(items, paired);
+    assert.equal(result.consumed, true);
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].id, mse.id);
+    assert.equal(result.items[0].url, video.url);
+    assert.equal(result.items[0].audioUrl, paired.audioUrl);
+  }
+});
+
+test('MSE arriving after a paired network video does not add a second download', () => {
+  const paired = item({
+    source: 'network',
+    url: 'https://cdn.example/video.m4s',
+    audioUrl: 'https://cdn.example/audio.m4s',
+  });
+  const mse = item({ id: 'mse', kind: 'mse', url: 'mse:https://example.com/watch' });
+  const result = reconcilePlayerEvidence([paired], mse);
+  assert.equal(result.consumed, true);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].audioUrl, paired.audioUrl);
+});
+
+test('Bilibili tracking changes do not duplicate a video, while another BV or part remains separate', () => {
+  const page = 'https://www.bilibili.com/video/BV1PcJd6UEQk';
+  const authority = item({ pageUrl: page, variants: [{ url: 'https://cdn.example/video.m4s' }] });
+  const mse = item({
+    kind: 'mse',
+    url: `mse:${page}/?vd_source=tracking#vidsy-player=1`,
+    pageUrl: `${page}/?vd_source=tracking&trackid=tracking&spm_id_from=tracking`,
+  });
+  assert.equal(reconcilePlayerEvidence([authority], mse).consumed, true);
+  assert.equal(sameMainPlayerSession(authority, { ...mse, pageUrl: `${page}/?p=1` }), true);
+  assert.equal(sameMainPlayerSession(authority, { ...mse, pageUrl: `${page}/?p=2` }), false);
+  assert.equal(sameMainPlayerSession(authority, { ...mse, pageUrl: 'https://www.bilibili.com/video/BVother/' }), false);
+  assert.equal(
+    sameMainPlayerSession(
+      item({ pageUrl: 'https://example.com/watch?v=1' }),
+      item({ pageUrl: 'https://example.com/watch?v=2' }),
+    ),
+    false,
+  );
+});
+
 test('presentation metadata updates only the explicitly resolved media item', () => {
   const first = item({ id: 'first', thumbnail: 'data:image/jpeg;base64,old-first' });
   const second = item({ id: 'second', thumbnail: 'data:image/jpeg;base64,old-second' });
@@ -130,6 +186,13 @@ test('an unavailable authoritative poster clears stale thumbnail evidence', () =
   const updated = applyPresentationMetadata([media], 'target', { thumbnail: null });
 
   assert.equal(updated?.[0].thumbnail, undefined);
+});
+
+test('player duration can be corrected without clearing an existing cover', () => {
+  const media = item({ id: 'target', thumbnail: 'data:image/jpeg;base64,cover', duration: 29836 });
+  const updated = applyPresentationMetadata([media], 'target', { duration: 29.927799 });
+  assert.equal(updated?.[0].thumbnail, media.thumbnail);
+  assert.equal(updated?.[0].duration, 29.927799);
 });
 
 test('progressive fMP4 evidence grows the variant set without regressing on stale observations', () => {

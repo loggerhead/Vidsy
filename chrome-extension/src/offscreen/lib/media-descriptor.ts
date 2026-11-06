@@ -201,7 +201,7 @@ const describeHls = async (args: {
   headers?: Record<string, string>;
   durationSeconds?: number;
   fetchImpl?: typeof fetch;
-  authorizeUrl?: (url: string) => Promise<void>;
+  authorizeUrl?: (url: string) => Promise<void | string>;
   signal?: AbortSignal;
 }): Promise<MediaDescriptor> => {
   const parsed = parseHlsPlaylist(args.manifestText, args.manifestUrl);
@@ -209,9 +209,9 @@ const describeHls = async (args: {
   const probeUrl = parsed.mapUrl ?? parsed.segments[0]?.url;
   let probe = { container: 'unknown' as MediaContainer, tracks: [] as MediaTrack[], hasInitializationSegment: false };
   if (probeUrl) {
-    await args.authorizeUrl?.(probeUrl);
+    const authorizedUrl = await args.authorizeUrl?.(probeUrl);
     const bytes = await fetchBoundedProbe(
-      probeUrl,
+      authorizedUrl || probeUrl,
       args.headers,
       args.fetchImpl,
       args.signal,

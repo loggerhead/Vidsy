@@ -1,6 +1,50 @@
-import { parseDashVariants } from './manifest-parser';
+import { parseDashVariants, parseHlsVariants } from './manifest-parser';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+
+test('parseHlsVariants recovers exact child ownership from a page-readable master', async () => {
+  const url = 'https://cdn.example/video/playlist.m3u8';
+  const master = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+640x360/video.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
+1280x720/video.m3u8
+`;
+  let pageFetches = 0;
+  const result = await parseHlsVariants(url, {
+    fetchImpl: async () => new Response('blocked', { status: 200 }),
+    fetchFromPage: async () => {
+      pageFetches++;
+      return { text: master, url };
+    },
+  });
+
+  assert.equal(pageFetches, 1);
+  assert.deepEqual(
+    result.variants.map(variant => variant.resolution?.height),
+    [360, 720],
+  );
+  assert.deepEqual(result.childUrls, [
+    'https://cdn.example/video/640x360/video.m3u8',
+    'https://cdn.example/video/1280x720/video.m3u8',
+  ]);
+});
+
+test('parseHlsVariants does not request the page when the extension reads a valid playlist', async () => {
+  const url = 'https://cdn.example/video/playlist.m3u8';
+  let pageFetches = 0;
+  const result = await parseHlsVariants(url, {
+    fetchImpl: async () => new Response('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nvideo.m3u8'),
+    fetchFromPage: async () => {
+      pageFetches++;
+      return undefined;
+    },
+  });
+
+  assert.equal(pageFetches, 0);
+  assert.deepEqual(result.childUrls, ['https://cdn.example/video/video.m3u8']);
+});
 
 test('parseDashVariants resolves representation URLs from an AdaptationSet BaseURL', async () => {
   type Node = {

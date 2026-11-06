@@ -3,7 +3,7 @@ import type { ExecutorCommand, ExecutorEvent } from '../../background/lib/downlo
 import type { MediaDownloadProgress } from '@extension/shared';
 
 export type ExecutionOutput = { blobUrl: string; artifact: OutputArtifact };
-export type ExecutionReport = { command: ExecutorCommand } & (
+export type ExecutionReport = { command: ExecutorCommand; sequence?: number } & (
   | { type: 'acknowledged' }
   | { type: 'progress'; progress: Partial<MediaDownloadProgress> }
   | { type: 'output'; output: ExecutionOutput }
@@ -24,9 +24,82 @@ export const createExecutionRegistry = (dependencies: {
   publish: (report: ExecutionReport) => Promise<unknown>;
 }) => {
   const records = new Map<string, ExecutionRecord>();
+  type Delivery = {
+    sequence: number;
+    inFlight: boolean;
+    attempts: number;
+    lastSentAt: number;
+    timer?: ReturnType<typeof setTimeout>;
+    acknowledged: number;
+  };
+  const deliveries = new Map<string, Delivery>();
+  const schedule = (record: ExecutionRecord, delivery: Delivery, delay: number): void => {
+    if (delivery.timer) clearTimeout(delivery.timer);
+    delivery.timer = setTimeout(() => {
+      delivery.timer = undefined;
+      send(record, delivery);
+    }, delay);
+    (delivery.timer as unknown as { unref?: () => void }).unref?.();
+  };
+  const send = (record: ExecutionRecord, delivery: Delivery): void => {
+    if (!records.has(record.command.executionId) || delivery.inFlight || delivery.acknowledged === delivery.sequence)
+      return;
+    const report = record.report;
+    const sequence = delivery.sequence;
+    delivery.inFlight = true;
+    delivery.lastSentAt = Date.now();
+    let timeout: ReturnType<typeof setTimeout>;
+    const deadline = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('Execution report acknowledgement timed out')), 10_000);
+    });
+    void Promise.race([Promise.resolve().then(() => dependencies.publish({ ...report, sequence })), deadline])
+      .then(
+        () => {
+          delivery.acknowledged = sequence;
+          delivery.attempts = 0;
+        },
+        () => {
+          delivery.attempts++;
+        },
+      )
+      .finally(() => {
+        clearTimeout(timeout);
+        delivery.inFlight = false;
+        if (!records.has(record.command.executionId)) return;
+        if (delivery.sequence !== sequence) {
+          const delay = record.report.type === 'progress' ? Math.max(0, 350 - (Date.now() - delivery.lastSentAt)) : 0;
+          schedule(record, delivery, delay);
+        } else if (delivery.acknowledged !== sequence) {
+          // Bounded exponential retries, followed by slow reconciliation. The
+          // last report stays in inventory until the background forgets it.
+          schedule(record, delivery, delivery.attempts <= 5 ? Math.min(500 * 2 ** delivery.attempts, 10_000) : 30_000);
+        }
+      });
+  };
   const publish = (record: ExecutionRecord, report: ExecutionReport) => {
+    const key = record.command.executionId;
+    const delivery = deliveries.get(key) ?? {
+      sequence: 0,
+      inFlight: false,
+      attempts: 0,
+      lastSentAt: 0,
+      acknowledged: -1,
+    };
+    deliveries.set(key, delivery);
+    delivery.sequence++;
+    // Preserve the public report shape; the wire sequence only fences retries.
+    const previous = record.report;
     record.report = report;
-    void dependencies.publish(report).catch(() => undefined);
+    const priorStage = previous.type === 'progress' ? previous.progress.stage : undefined;
+    const immediate = report.type !== 'progress' || priorStage !== report.progress.stage;
+    if (delivery.timer) {
+      clearTimeout(delivery.timer);
+      delivery.timer = undefined;
+    }
+    if (!delivery.inFlight) {
+      if (immediate || Date.now() - delivery.lastSentAt >= 350) send(record, delivery);
+      else schedule(record, delivery, 350 - (Date.now() - delivery.lastSentAt));
+    }
   };
   return {
     start(command: ExecutorCommand) {
@@ -72,11 +145,26 @@ export const createExecutionRegistry = (dependencies: {
       const record = [...records.values()].find(record => record.command.requestId === key);
       if (!record) return false;
       if (record.stop || ['output', 'failed', 'cancelled'].includes(record.report.type)) return true;
-      publish(record, { command: record.command, type: 'progress', progress });
+      const previous = record.report.type === 'progress' ? record.report.progress : {};
+      publish(record, {
+        command: record.command,
+        type: 'progress',
+        progress: {
+          ...previous,
+          ...progress,
+          muxPercent: progress.muxPercent,
+          activity: progress.activity,
+        },
+      });
       return true;
     },
     inventory: () => [...records.values()],
-    forget: (executionId: string) => records.delete(executionId),
+    forget: (executionId: string) => {
+      const delivery = deliveries.get(executionId);
+      if (delivery?.timer) clearTimeout(delivery.timer);
+      deliveries.delete(executionId);
+      return records.delete(executionId);
+    },
   };
 };
 

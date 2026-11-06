@@ -53,6 +53,18 @@ const IconMoon = () => (
 
 export const SettingsPanel = ({ isLight }: { isLight: boolean }) => {
   const settings = useStorage(mediaSettingsStorage);
+  const exportDiagnostics = async () => {
+    const result = await chrome.storage.local.get('vidsy-download-diagnostics');
+    const blob = new Blob([JSON.stringify(result['vidsy-download-diagnostics'] ?? [], null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `vidsy-diagnostics-${Date.now()}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
 
   const cardCls = cn(
     'rounded-2xl border',
@@ -64,6 +76,18 @@ export const SettingsPanel = ({ isLight }: { isLight: boolean }) => {
 
   return (
     <div className="space-y-6">
+      <div className={cn('flex items-center justify-between rounded-2xl border px-5 py-4', cardCls)}>
+        <div>
+          <p className={cn('text-sm font-medium', label)}>Download diagnostics</p>
+          <p className={cn('text-xs', sub)}>Export recent download events to help investigate failures</p>
+        </div>
+        <button
+          type="button"
+          className={cn('rounded-lg border px-3 py-2 text-sm', label)}
+          onClick={() => void exportDiagnostics()}>
+          Export
+        </button>
+      </div>
       <div>
         <h2 className={cn('text-lg font-semibold', label)}>Preferences</h2>
         <p className={cn('mt-1 text-sm', sub)}>Customize how Vidsy works</p>

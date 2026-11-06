@@ -114,19 +114,13 @@ describe.skipIf(!enabled)('Live media downloads', () => {
           if (process.env.VIDSY_E2E_AI === 'off') await compactButton.click();
           else await agent.aiTap('the Vidsy Show download options button');
 
-          const downloadChoices = content.locator('button:not([aria-label])');
-          const x1080pChoice = downloadChoices.filter({ hasText: /1080p/i }).first();
-          const downloadButton =
-            site.name === 'X' && (await x1080pChoice.count()) ? x1080pChoice : downloadChoices.first();
+          const x1080pChoice = content.getByRole('radio', { name: /^1080p,/ }).first();
+          if (site.name === 'X' && (await x1080pChoice.count())) await x1080pChoice.check();
+          const downloadButton = content.getByRole('button', { name: /^Download (?:\d+p|video)$/ });
           await downloadButton.waitFor();
           await aiAssert(agent, 'The Vidsy download menu is open with a video quality choice');
           if (process.env.VIDSY_E2E_AI === 'off') await downloadButton.click();
-          else
-            await agent.aiTap(
-              site.name === 'X'
-                ? 'the 1080p video download choice in the Vidsy menu'
-                : 'the first video download choice in the Vidsy menu',
-            );
+          else await agent.aiTap('the primary Download button at the bottom of the Vidsy menu');
 
           const downloaded = await waitForCompletedFile(before);
           const filePath = join(downloadDirectory!, downloaded);

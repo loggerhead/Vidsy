@@ -9,6 +9,12 @@ type ManifestParseResult = {
   childUrls?: string[];
 };
 
+type HlsManifestBody = { text: string; url: string };
+type HlsParseOptions = {
+  fetchImpl?: typeof fetch;
+  fetchFromPage?: () => Promise<HlsManifestBody | undefined>;
+};
+
 const manifestUrlForLog = (value: string): string => {
   try {
     const url = new URL(value);
@@ -30,17 +36,31 @@ const isHlsKeyLineDrm = (attrsRaw: string): boolean => {
   return method !== 'NONE' && method !== '' && method !== 'AES-128';
 };
 
-const parseHlsVariants = async (manifestUrl: string): Promise<ManifestParseResult> => {
+const parseHlsVariants = async (manifestUrl: string, options: HlsParseOptions = {}): Promise<ManifestParseResult> => {
   try {
     manifestLog('hls.fetch.start', { url: manifestUrlForLog(manifestUrl) });
-    const res = await fetch(manifestUrl);
-    if (!res.ok) {
-      manifestLog('hls.fetch.failed', { url: manifestUrlForLog(manifestUrl), status: res.status });
-      return { variants: [], isDrmProtected: false };
+    let body: HlsManifestBody | undefined;
+    try {
+      const res = await (options.fetchImpl ?? fetch)(manifestUrl);
+      if (res.ok) {
+        const text = await res.text();
+        if (text.trimStart().startsWith('#EXTM3U')) body = { text, url: res.url || manifestUrl };
+        else manifestLog('hls.fetch.invalid_body', { url: manifestUrlForLog(manifestUrl) });
+      } else {
+        manifestLog('hls.fetch.failed', { url: manifestUrlForLog(manifestUrl), status: res.status });
+      }
+    } catch (error) {
+      manifestLog('hls.fetch.failed', { url: manifestUrlForLog(manifestUrl), error: String(error) });
     }
-    const text = await res.text();
+    if (!body && options.fetchFromPage) {
+      const fallback = await options.fetchFromPage();
+      if (fallback?.text.trimStart().startsWith('#EXTM3U')) body = fallback;
+    }
+    if (!body) return { variants: [], isDrmProtected: false };
+
+    const { text } = body;
     const lines = text.split('\n');
-    const { variants: parsedVariants, childUrls } = parseHlsMaster(text, res.url || manifestUrl);
+    const { variants: parsedVariants, childUrls } = parseHlsMaster(text, body.url);
     const variants: MediaVariant[] = parsedVariants;
     const isDrmProtected = lines.some(
       line =>

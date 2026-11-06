@@ -85,3 +85,20 @@ test('writeAt rejects a stalled write and a quota failure without advancing size
     quota.restore();
   }
 });
+
+test('known-size reservations share quota and release on close', async () => {
+  const double = installOpfsDouble(buffer => buffer.byteLength);
+  Object.assign(navigator.storage, { estimate: async () => ({ quota: 100, usage: 0 }) });
+  try {
+    const map = new OpfsWritableMap();
+    await map.open('first');
+    await map.open('second');
+    await map.reserve('first', 80);
+    await assert.rejects(map.reserve('second', 30), /Insufficient temporary storage/);
+    await map.close('first');
+    await map.reserve('second', 30);
+    await map.close('second');
+  } finally {
+    double.restore();
+  }
+});

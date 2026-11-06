@@ -12,12 +12,13 @@ import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs } from '.
 const opfsNameFor = (key: string, tag: string, ext: string): string =>
   `hls-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}-${tag}-${Date.now().toString(36)}.${ext}`;
 
-const authorizeDownloadUrl = async (key: string, url: string): Promise<void> => {
+const authorizeDownloadUrl = async (key: string, url: string): Promise<string> => {
   const response = await chrome.runtime.sendMessage({
     type: 'offscreen/authorize-download-url',
     payload: { key, url },
   });
   if (!response?.ok) throw new Error(response?.error || `Failed to authorize HLS request: ${url}`);
+  return response.url ?? url;
 };
 
 export const downloadHlsMuxed = async (
@@ -144,6 +145,7 @@ export const downloadHlsMuxed = async (
       if (plan.type === 'concatenate-fmp4') {
         const file = await getOpfsFile(inputOpfsName);
         const delivery = await prepareOutputDelivery({
+          jobKey: key,
           file,
           opfsName: inputOpfsName,
           plan,
@@ -177,6 +179,7 @@ export const downloadHlsMuxed = async (
 
     const outputFile = await getOpfsFile(outputOpfsName);
     const delivery = await prepareOutputDelivery({
+      jobKey: key,
       file: outputFile,
       opfsName: outputOpfsName,
       plan,

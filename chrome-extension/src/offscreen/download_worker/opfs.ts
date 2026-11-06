@@ -18,11 +18,33 @@ type Entry = {
   handle: FileSystemFileHandle;
   sync: FileSystemSyncAccessHandleShim;
   size: number;
+  writeCalls: number;
+  bytesWritten: number;
+  lastWriteAt: number;
 };
 
 export class OpfsWritableMap {
   private entries = new Map<string, Entry>();
+  private reservations = new Map<string, number>();
+  private reservationTail = Promise.resolve();
   private root: FileSystemDirectoryHandle | null = null;
+
+  async reserve(name: string, expectedBytes: number): Promise<void> {
+    const pending = this.reservationTail.then(async () => {
+      const remaining = Math.max(0, expectedBytes - this.size(name));
+      if (navigator.storage?.estimate) {
+        const { quota, usage } = await navigator.storage.estimate();
+        const other = [...this.reservations].reduce((sum, [key, bytes]) => (key === name ? sum : sum + bytes), 0);
+        if (quota !== undefined && usage !== undefined && quota - usage - other < remaining)
+          throw new Error(
+            `Insufficient temporary storage: need ${(remaining / 2 ** 30).toFixed(2)} GB plus other active reservations`,
+          );
+      }
+      this.reservations.set(name, remaining);
+    });
+    this.reservationTail = pending.catch(() => undefined);
+    return pending;
+  }
 
   private async getRoot(): Promise<FileSystemDirectoryHandle> {
     if (!this.root) this.root = await navigator.storage.getDirectory();
@@ -38,7 +60,14 @@ export class OpfsWritableMap {
     const handle = (await root.getFileHandle(name, { create: true })) as FileSystemFileHandleWithSync;
     const sync = await handle.createSyncAccessHandle();
     if (!preserve) sync.truncate(0);
-    this.entries.set(name, { handle, sync, size: preserve ? sync.getSize() : 0 });
+    this.entries.set(name, {
+      handle,
+      sync,
+      size: preserve ? sync.getSize() : 0,
+      writeCalls: 0,
+      bytesWritten: 0,
+      lastWriteAt: 0,
+    });
   }
 
   flush(name: string): void {
@@ -54,8 +83,15 @@ export class OpfsWritableMap {
       const n = entry.sync.write(view.subarray(written), { at: pos + written });
       if (n <= 0) throw new Error(`OPFS write stalled at ${pos + written} (sync.write returned ${n})`);
       written += n;
+      entry.writeCalls++;
+      entry.bytesWritten += n;
+      entry.lastWriteAt = Date.now();
     }
-    if (pos + written > entry.size) entry.size = pos + written;
+    if (pos + written > entry.size) {
+      const growth = pos + written - entry.size;
+      this.reservations.set(name, Math.max(0, (this.reservations.get(name) ?? 0) - growth));
+      entry.size = pos + written;
+    }
     return written;
   }
 
@@ -85,20 +121,27 @@ export class OpfsWritableMap {
     entry.size = newSize;
   }
 
+  stats(name: string) {
+    const entry = this.entries.get(name);
+    return entry
+      ? { writeCalls: entry.writeCalls, bytesWritten: entry.bytesWritten, lastWriteAt: entry.lastWriteAt }
+      : undefined;
+  }
+
   size(name: string): number {
     return this.entries.get(name)?.size ?? 0;
   }
 
   async close(name: string): Promise<void> {
+    this.reservations.delete(name);
     const entry = this.entries.get(name);
     if (!entry) return;
     try {
       entry.sync.flush();
-    } catch {
-      /* ignore */
+    } finally {
+      entry.sync.close();
+      this.entries.delete(name);
     }
-    entry.sync.close();
-    this.entries.delete(name);
   }
 
   async getFile(name: string): Promise<File> {

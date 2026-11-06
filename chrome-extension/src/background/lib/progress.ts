@@ -19,6 +19,9 @@ type ProgressUpdate = {
   estimatedBytes?: number;
   error?: string;
   muxPercent?: number;
+  activity?: 'waiting-network' | 'receiving' | 'retrying' | 'waiting-mux' | 'verifying';
+  completedParts?: number;
+  totalParts?: number;
   downloadId?: number;
   chunks?: ChunkProgress[];
   transferMode?: 'range' | 'stream' | 'mixed';
@@ -67,6 +70,9 @@ export const updateProgress = (key: string, progress: ProgressUpdate, context?: 
       downloadedBytes: progress.downloadedBytes,
       estimatedBytes: progress.estimatedBytes ?? existing?.estimatedBytes,
       muxPercent: progress.muxPercent,
+      activity: progress.activity,
+      completedParts: progress.completedParts,
+      totalParts: progress.totalParts,
       error: progress.error,
       downloadId: progress.downloadId ?? (context?.clearDownloadId ? undefined : existing?.downloadId),
       item: context?.item ?? existing?.item,

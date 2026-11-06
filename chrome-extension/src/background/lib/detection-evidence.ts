@@ -8,8 +8,22 @@ const isVariantAuthority = (item: MediaItem): boolean => item.source === 'elemen
 
 const isFetchablePlayerAuthority = (item: MediaItem): boolean => isVariantAuthority(item) || hasPairedAudio(item);
 
+const playerPageKey = (value: string): string => {
+  try {
+    const url = new URL(value);
+    if (url.hostname === 'www.bilibili.com' && /^\/video\/BV[\w]+\/?$/.test(url.pathname)) {
+      // Tracking parameters can be added after the first detection. A part
+      // number changes the media; vd_source, trackid and spm_id_from do not.
+      return `${url.origin}${url.pathname.replace(/\/$/, '')}?p=${url.searchParams.get('p') ?? '1'}`;
+    }
+  } catch {
+    // Non-HTTP identifiers retain exact matching.
+  }
+  return value;
+};
+
 const sameMainPlayerSession = (left: MediaItem, right: MediaItem): boolean => {
-  if (!left.pageUrl || !right.pageUrl || left.pageUrl !== right.pageUrl) return false;
+  if (!left.pageUrl || !right.pageUrl || playerPageKey(left.pageUrl) !== playerPageKey(right.pageUrl)) return false;
   if (left.duration && right.duration && Math.abs(left.duration - right.duration) >= 2) return false;
   return true;
 };
@@ -77,8 +91,12 @@ const reconcilePlayerEvidence = (
   const merged = incomingIsMse
     ? combineMseAndFetchable(incoming, counterpart)
     : combineMseAndFetchable(counterpart, incoming);
+  // A partial network item may already exist when its audio arrives. Replace
+  // the placeholder and remove that earlier copy of the same download URL.
   return {
-    items: items.map((item, index) => (index === counterpartIndex ? merged : item)),
+    items: items.flatMap((item, index) =>
+      index === counterpartIndex ? [merged] : item.url === merged.url ? [] : [item],
+    ),
     consumed: true,
   };
 };

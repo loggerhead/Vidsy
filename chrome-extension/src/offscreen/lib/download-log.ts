@@ -1,4 +1,4 @@
-import { createLogger } from '@extension/shared';
+import { createLogger, sanitizeLogData } from '@extension/shared';
 
 const safeUrl = (value: string): string => {
   try {
@@ -14,6 +14,14 @@ const errorInfo = (error: unknown) => ({
   message: error instanceof Error ? error.message : String(error),
 });
 
-const flowLog = createLogger('download').debug;
+const log = createLogger('download');
+let diagnosticReporter: ((event: string, data: unknown) => void) | undefined;
+const setDownloadDiagnosticReporter = (report: NonNullable<typeof diagnosticReporter>) => {
+  diagnosticReporter = report;
+};
+const flowLog = (event: string, data?: unknown): void => {
+  log.debug(event, data);
+  if (/start|done|failed|retry|fallback|plan|snapshot/.test(event)) diagnosticReporter?.(event, sanitizeLogData(data));
+};
 
-export { errorInfo, flowLog, safeUrl };
+export { errorInfo, flowLog, safeUrl, setDownloadDiagnosticReporter };

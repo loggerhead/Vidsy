@@ -6,6 +6,7 @@
 //
 // Range downloads include the live per-connection breakdown reported by the worker.
 
+import { downloadPercent } from '../lib/download-percent';
 import { MEDIA_MESSAGE, formatSpeed, useStorage } from '@extension/shared';
 import { mediaSettingsStorage } from '@extension/storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -220,7 +221,7 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
   })();
   const totalBytes = entry.estimatedBytes ?? 0;
   const downloadedBytes = entry.downloadedBytes ?? 0;
-  const pct = totalBytes > 0 ? Math.min(100, (downloadedBytes / totalBytes) * 100) : (entry.muxPercent ?? null);
+  const pct = downloadPercent(entry);
   const isActive = ACTIVE_STAGES.has(entry.stage);
   const isMuxing = entry.stage === 'mux' || entry.stage === 'finalize';
   const eta = speed > 0 && totalBytes > downloadedBytes ? (totalBytes - downloadedBytes) / speed : undefined;
@@ -244,7 +245,15 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
     ? stalledMs > 30_000
       ? 'Stalled — waiting for server…'
       : 'Connecting…'
-    : (STAGE_LABEL[entry.stage] ?? entry.stage);
+    : entry.activity === 'waiting-mux'
+      ? 'Waiting to merge…'
+      : entry.activity === 'verifying'
+        ? 'Checking file…'
+        : entry.activity === 'retrying'
+          ? 'Retrying download…'
+          : entry.activity === 'waiting-network'
+            ? 'Waiting for connection…'
+            : (STAGE_LABEL[entry.stage] ?? entry.stage);
 
   // Download Complete view — replaces the in-progress UI when stage='success'.
   if (entry.stage === 'success') {

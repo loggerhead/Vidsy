@@ -1,18 +1,91 @@
 --- a/libavformat/jsfetch.c
 +++ b/libavformat/jsfetch.c
-@@ -174,7 +174,11 @@ static int jsfetch_open(URLContext *h, const char *url, int flags, AVDictionary
+@@ -51,7 +51,7 @@
+ /**
+  * Open a fetch connection (JavaScript side).
+  */
+-EM_JS(int, jsfetch_open_js, (const char *url, uint64_t start_offset), {
++EM_JS(int, jsfetch_open_js, (const char *url, double start_offset), {
+     return Asyncify.handleAsync(function() {
+             url = UTF8ToString(url);
+             var fetchUrl = url.slice(0, 8) === "jsfetch:" ? url.slice(8) : url;
+@@ -71,4 +71,8 @@
+             return fetch(fetchUrl, fetchOptions).then(function(response) {
++                if (!response.ok) {
++                    if (response.body) response.body.cancel();
++                    throw new Error("jsfetch open failed with HTTP " + response.status);
++                }
+                 return {response: response, abortController: abortController};
+             });
+         }).then(function(result) {
+@@ -113,7 +117,7 @@
+ /**
+  * Get file size from JavaScript side.
+  */
+-EM_JS(uint64_t, jsfetch_get_filesize_js, (int idx), {
++EM_JS(double, jsfetch_get_filesize_js, (int idx), {
+     var jsfo = Module.libavjsJSFetch.fetches[idx];
+-    return jsfo ? jsfo.filesize : 0;
++    return jsfo && Number.isSafeInteger(jsfo.filesize) && jsfo.filesize > 0 ? jsfo.filesize : 0;
+ });
+@@ -192,10 +196,16 @@
  static int jsfetch_read(URLContext *h, unsigned char *buf, int size)
  {
      JSFetchContext *ctx = h->priv_data;
 -    return jsfetch_read_js(ctx->idx, buf, size);
-+    int ret = jsfetch_read_js(ctx->idx, buf, size);
-+
++    int ret;
++    if (ctx->seekable == 1 && ctx->off >= ctx->filesize)
++        return AVERROR_EOF;
++    ret = jsfetch_read_js(ctx->idx, buf, size);
 +    if (ret > 0)
 +        ctx->off += ret;
 +    return ret;
  }
  
- EM_JS(int, jsfetch_seek_js, (int old_idx, const char *url, uint64_t start_offset), {
+-EM_JS(int, jsfetch_seek_js, (int old_idx, const char *url, uint64_t start_offset), {
++EM_JS(int, jsfetch_seek_js, (int old_idx, const char *url, double start_offset), {
+     return Asyncify.handleAsync(function () {
+         url = UTF8ToString(url);
+         var fetchUrl = url.slice(0, 8) === "jsfetch:" ? url.slice(8) : url;
+@@ -207,7 +217,12 @@
+             var abortController = new AbortController();
+             fetchOptions.signal = abortController.signal;
+             return fetch(fetchUrl, fetchOptions).then(function (response) {
+-              return { response: response, abortController: abortController };
++              if (response.status !== 206) {
++                if (response.body) response.body.cancel();
++                throw new Error("jsfetch seek failed with HTTP " + response.status + " at offset " + start_offset);
++              }
++              var old = Module.libavjsJSFetch && Module.libavjsJSFetch.fetches[old_idx];
++              return { response: response, abortController: abortController, filesize: old ? old.filesize : 0 };
+             });
+           })
+           .then(function (result) {
+@@ -235,7 +250,7 @@
+               abortController: abortController,
+               buf: null,
+               rej: null,
+-              filesize: 0,
++              filesize: result.filesize || 0,
+             });
+             var contentRange = response.headers.get("Content-Range");
+             if (contentRange) {
+@@ -295,4 +310,8 @@
+         return AVERROR(EINVAL);
+     if (off < 0)
+         return AVERROR(EINVAL);
++    if (ctx->seekable == 1 && (uint64_t)off >= ctx->filesize) {
++        ctx->off = off;
++        return off;
++    }
+     ctx->off = off;
+@@ -303,5 +322,5 @@
+     int new_idx = jsfetch_seek_js(ctx->idx, h->filename, off);
+     if (new_idx < 0) {
+        ctx->off = old_off;
+-       return old_off;
++       return new_idx;
+     }
 --- a/libavformat/dashdec.c
 +++ b/libavformat/dashdec.c
 @@ -431,6 +431,8 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,

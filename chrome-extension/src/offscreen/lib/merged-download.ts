@@ -83,7 +83,7 @@ export const downloadMerged = async (
 
       progressWrite = progressWrite.then(() =>
         updateProgress(key, {
-          stage: 'download-video',
+          stage: tracks.video.done && !tracks.audio.done ? 'download-audio' : 'download-video',
           downloadedBytes,
           estimatedBytes,
           chunks: [],
@@ -174,11 +174,13 @@ export const downloadMerged = async (
     let videoDownload: Awaited<ReturnType<typeof downloadVideo>>;
     let audioDownload: Awaited<ReturnType<typeof downloadAudio>>;
     if (totalConnectionBudget > 1) {
+      let firstFailure: unknown;
       const abortSiblingsOnFailure = async <T>(promise: Promise<T>): Promise<T> => {
         try {
           return await promise;
         } catch (err) {
-          abortController.abort();
+          firstFailure ??= err;
+          abortController.abort(err);
           cancelWorkerJob(key);
           throw err;
         }
@@ -189,7 +191,7 @@ export const downloadMerged = async (
       ]);
       const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failure) {
-        throw failure.reason;
+        throw firstFailure ?? failure.reason;
       }
       const [videoResult, audioResult] = results;
       if (videoResult.status !== 'fulfilled' || audioResult.status !== 'fulfilled') {
@@ -239,7 +241,7 @@ export const downloadMerged = async (
     await removeOpfs(audioOpfsName).catch(() => undefined);
 
     const outputFile = await getOpfsFile(outputOpfsName);
-    const delivery = await prepareOutputDelivery({ file: outputFile, opfsName: outputOpfsName, plan });
+    const delivery = await prepareOutputDelivery({ jobKey: key, file: outputFile, opfsName: outputOpfsName, plan });
     flowLog('merged.done', { outputBytes: delivery.artifact.size, output: plan.output });
     return delivery;
   } catch (err) {
@@ -266,7 +268,7 @@ export const downloadMerged = async (
     throw err;
   } finally {
     activeAbortControllers.delete(key);
-    if (abortController.signal.aborted) {
+    if (abortController.signal.aborted && downloadStopIntents.has(key)) {
       await updateProgress(key, { stage: 'cancelled', downloadedBytes: 0 });
     }
   }

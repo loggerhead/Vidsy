@@ -53,6 +53,29 @@ const fetchThumbnailAsDataUrl = async (url: string): Promise<string | null> => {
   }
 };
 
+// A player can read its HLS manifest while a second request from the extension
+// cannot. Ask the tab for the same CORS-readable text only when the extension
+// fetch failed; the parser still owns URL resolution and parent-child matching.
+const fetchHlsManifestFromPage = async (tabId: number, url: string) => {
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'ISOLATED',
+      func: async manifestUrl => {
+        const response = await fetch(manifestUrl, { credentials: 'omit' });
+        if (!response.ok) return undefined;
+        const text = await response.text();
+        if (text.length > 1024 * 1024) return undefined;
+        return { text, url: response.url || manifestUrl };
+      },
+      args: [url],
+    });
+    return injection?.result;
+  } catch {
+    return undefined;
+  }
+};
+
 // URLs we've already attempted a HEAD probe for, to avoid repeat requests
 // when an item is patched / re-upserted. Set membership doesn't say whether
 // the probe succeeded, only that we've tried.
@@ -384,30 +407,24 @@ const setTabItems = (tabKey: string, items: MediaItem[]) => {
 
 const updatePresentationMetadata = async (
   itemId: string,
-  metadata: { thumbnailUrl: string | null; duration?: number },
+  metadata: { thumbnailUrl?: string | null; duration?: number },
   tabId: number,
 ): Promise<boolean> => {
   const requestKey = `${tabId}:${itemId}`;
-  presentationThumbnailRequests.set(requestKey, metadata.thumbnailUrl);
-  const thumbnail = metadata.thumbnailUrl ? await fetchThumbnailAsDataUrl(metadata.thumbnailUrl) : undefined;
-  if (presentationThumbnailRequests.get(requestKey) !== metadata.thumbnailUrl) return false;
+  let thumbnail: string | null | undefined;
+  if (metadata.thumbnailUrl !== undefined) {
+    presentationThumbnailRequests.set(requestKey, metadata.thumbnailUrl);
+    thumbnail = metadata.thumbnailUrl ? await fetchThumbnailAsDataUrl(metadata.thumbnailUrl) : null;
+    if (presentationThumbnailRequests.get(requestKey) !== metadata.thumbnailUrl) return false;
+  }
   const duration =
     metadata.duration !== undefined && Number.isFinite(metadata.duration) && metadata.duration > 0
       ? metadata.duration
       : undefined;
-  if (duration === undefined && metadata.thumbnailUrl === null) {
-    const tabKey = String(tabId);
-    const current = await getTabItems(tabKey);
-    const updated = applyPresentationMetadata(current, itemId, { thumbnail: null });
-    if (!updated) return false;
-    setTabItems(tabKey, updated);
-    return true;
-  }
-
   const tabKey = String(tabId);
   const current = await getTabItems(tabKey);
   const updated = applyPresentationMetadata(current, itemId, {
-    thumbnail: thumbnail ?? null,
+    ...(metadata.thumbnailUrl !== undefined ? { thumbnail: thumbnail ?? null } : {}),
     ...(duration !== undefined ? { duration } : {}),
   });
   if (!updated) return false;
@@ -585,11 +602,14 @@ export const upsertDetection = async (
           : v,
       );
       const updated = current.map((it, i) => (i === variantOwnerIdx ? { ...it, variants: newVariants } : it));
+      current = updated;
       setTabItems(tabKey, updated);
       if (tabId !== undefined) updateBadge(tabId, updated.length);
     }
-    // No richer data to add — drop the duplicate detection on the floor.
-    return;
+    // A child URL belongs only to its owner. The primary URL can also carry
+    // a newer complete snapshot (notably a late audio track); keep processing
+    // it so reconciliation and the item-level patch can consume that evidence.
+    if (current[variantOwnerIdx].url !== candidate.url) return;
   }
 
   const existingIdx = current.findIndex(item => item.url === candidate.url);
@@ -957,7 +977,9 @@ export const handleNetworkDetection = async (details: chrome.webRequest.WebRespo
   let hlsChildUrls: string[] | undefined;
   let isDrmProtected = false;
   if (kind === 'hls') {
-    const parsed = await parseHlsVariants(url);
+    const parsed = await parseHlsVariants(url, {
+      fetchFromPage: tabId >= 0 ? () => fetchHlsManifestFromPage(tabId, url) : undefined,
+    });
     variants = parsed.variants;
     hlsChildUrls = parsed.childUrls;
     isDrmProtected = parsed.isDrmProtected;

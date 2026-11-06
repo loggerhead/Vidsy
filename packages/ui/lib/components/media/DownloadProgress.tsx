@@ -56,23 +56,35 @@ export const DownloadProgress = ({ progress, isLight }: { progress: MediaDownloa
             : 'bg-amber-500'
           : 'bg-blue-500';
 
+  const activityLabel =
+    progress.activity === 'waiting-mux'
+      ? 'Waiting to merge'
+      : progress.activity === 'waiting-network'
+        ? 'Waiting for connection'
+        : progress.activity === 'retrying'
+          ? 'Retrying'
+          : progress.activity === 'verifying'
+            ? 'Checking file'
+            : undefined;
   const label = isCancelled
     ? 'Cancelled'
     : isFailed && progress.error
       ? progress.error.slice(0, 30)
-      : isQueued
-        ? progress.queuePosition && progress.queuePosition > 1
-          ? `Queued · #${progress.queuePosition}`
-          : 'Queued'
-        : isMuxing
-          ? pct !== undefined
-            ? `Processing ${pct}%`
-            : 'Processing...'
-          : isFinalizing
-            ? 'Saving...'
-            : pct !== undefined
-              ? `${pct}%`
-              : progress.stage;
+      : activityLabel && !isFailed
+        ? activityLabel
+        : isQueued
+          ? progress.queuePosition && progress.queuePosition > 1
+            ? `Queued · #${progress.queuePosition}`
+            : 'Queued'
+          : isMuxing
+            ? pct !== undefined
+              ? `Processing ${pct}%`
+              : 'Processing...'
+            : isFinalizing
+              ? 'Saving...'
+              : pct !== undefined
+                ? `${progress.stage === 'download-audio' ? 'Audio · ' : ''}${pct}%`
+                : progress.stage;
 
   const speedText = speed > 0 && isActive && !isPostDownload && !isQueued ? formatSpeed(speed) : '';
 

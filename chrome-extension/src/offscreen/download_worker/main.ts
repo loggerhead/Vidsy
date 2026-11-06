@@ -3,7 +3,8 @@
 // without holding payloads in the JS heap. The main thread still drives ffmpeg.wasm
 // and mounts OPFS Files via WORKERFS at mux time.
 
-import { createLibAV, registerJsfetch, registerOutputDevice } from './libav';
+import { BufferedWriter } from './buffered-writer';
+import { createLibAV, registerJsfetch, registerOutputDevice, flushOutputDevice } from './libav';
 import { opfs } from './opfs';
 import { assertNonEmptyOutput, assertSuccessfulMux } from './output-validation';
 import { RangeResumeRegistry } from './range-resume';
@@ -14,10 +15,12 @@ import {
   RangeResponseError,
   expectedResponseBytes,
 } from './response-validation';
-import { errorInfo, flowLog, safeUrl } from '../lib/download-log';
+import { errorInfo, flowLog, safeUrl, setDownloadDiagnosticReporter } from '../lib/download-log';
 import { decryptSegment } from '../lib/hls-crypto';
 import { headersForFetch } from '../lib/hls-request';
 import { buildMediaProcessingArgs } from '../lib/media-processing';
+import { HttpRequestError, openDownloadResponse, retryableRequest } from '../lib/network-request';
+import { downloadConnections, mergeSlots } from '../lib/resource-budget';
 import { createLogger } from '@extension/shared';
 import type {
   FetchRangesRequest,
@@ -34,29 +37,99 @@ import type { ChunkProgress } from '@extension/shared';
 const MAX_CONCURRENT = 8;
 const rangeResume = new RangeResumeRegistry();
 const MAX_RETRIES = 3;
-const SEGMENT_TIMEOUT_MS = 30_000;
 
-const post = (msg: WorkerResponse): void => {
+const rawPost = (msg: WorkerResponse): void => {
   (self as unknown as Worker).postMessage(msg);
 };
+const progressPending = new Map<
+  string,
+  { message: Extract<WorkerResponse, { type: 'progress' }>; timer: ReturnType<typeof setTimeout> }
+>();
+const diagnosticFiles = new Map<string, string>();
+const diagnosticTimes = new Map<string, { bytes: number; lastReceivedAt: number; lastSnapshotAt: number }>();
+const progressSent = new Map<string, { at: number; stage: string }>();
+const post = (msg: WorkerResponse): void => {
+  if (msg.type === 'progress') {
+    const now = Date.now();
+    const metric = diagnosticTimes.get(msg.jobId) ?? { bytes: 0, lastReceivedAt: now, lastSnapshotAt: 0 };
+    if (msg.downloadedBytes !== metric.bytes) {
+      metric.bytes = msg.downloadedBytes;
+      metric.lastReceivedAt = now;
+    }
+    if (now - metric.lastSnapshotAt >= 10_000) {
+      metric.lastSnapshotAt = now;
+      flowLog('worker.download.snapshot', {
+        key: msg.jobKey,
+        stage: msg.stage,
+        activity: msg.activity,
+        downloadedBytes: msg.downloadedBytes,
+        estimatedBytes: msg.estimatedBytes,
+        lastReceivedAt: metric.lastReceivedAt,
+        completedParts: msg.completedParts,
+        totalParts: msg.totalParts,
+        disk: opfs.stats(diagnosticFiles.get(msg.jobId) ?? ''),
+      });
+    }
+    diagnosticTimes.set(msg.jobId, metric);
+    const prior = progressSent.get(msg.jobId);
+    const pending = progressPending.get(msg.jobId);
+    if (!prior || prior.stage !== msg.stage || Date.now() - prior.at >= 350) {
+      if (pending) clearTimeout(pending.timer);
+      progressPending.delete(msg.jobId);
+      progressSent.set(msg.jobId, { at: Date.now(), stage: msg.stage });
+      rawPost(msg);
+    } else if (pending) pending.message = msg;
+    else {
+      const entry = {
+        message: msg,
+        timer: setTimeout(
+          () => {
+            progressPending.delete(msg.jobId);
+            progressSent.set(msg.jobId, { at: Date.now(), stage: entry.message.stage });
+            rawPost(entry.message);
+          },
+          350 - (Date.now() - prior.at),
+        ),
+      };
+      progressPending.set(msg.jobId, entry);
+    }
+    return;
+  }
+  if ('jobId' in msg) {
+    const pending = progressPending.get(msg.jobId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      rawPost(pending.message);
+      progressPending.delete(msg.jobId);
+    }
+    progressSent.delete(msg.jobId);
+    diagnosticTimes.delete(msg.jobId);
+    diagnosticFiles.delete(msg.jobId);
+  }
+  rawPost(msg);
+};
+setDownloadDiagnosticReporter((event, data) => rawPost({ type: 'diagnostic', event, data }));
 let authorizationCounter = 0;
-const pendingAuthorization = new Map<string, { resolve: (key?: string) => void; reject: (error: Error) => void }>();
+const pendingAuthorization = new Map<
+  string,
+  { resolve: (result: { key?: string; url: string }) => void; reject: (error: Error) => void }
+>();
 const authorizeResource = async (
   jobKey: string,
   url: string,
   headers?: Record<string, string>,
-): Promise<() => void> => {
-  if (!headers) return () => {};
+): Promise<(() => void) & { url: string }> => {
+  if (!headers) return Object.assign(() => {}, { url });
   const authorizationId = `authorize-${++authorizationCounter}`;
-  const downloadKey = await new Promise<string | undefined>((resolve, reject) => {
+  const authorized = await new Promise<{ key?: string; url: string }>((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingAuthorization.delete(authorizationId);
       reject(new Error('Request header authorization timed out'));
     }, 10_000);
     pendingAuthorization.set(authorizationId, {
-      resolve: key => {
+      resolve: result => {
         clearTimeout(timeout);
-        resolve(key);
+        resolve(result);
       },
       reject: error => {
         clearTimeout(timeout);
@@ -65,9 +138,47 @@ const authorizeResource = async (
     });
     post({ type: 'authorize-url', authorizationId, jobKey, url });
   });
-  return () => {
-    if (downloadKey) post({ type: 'release-url', downloadKey, url });
-  };
+  return Object.assign(
+    () => {
+      if (authorized.key) post({ type: 'release-url', downloadKey: authorized.key, url: authorized.url });
+    },
+    { url: authorized.url },
+  );
+};
+
+const openAuthorizedResponse = async (
+  jobKey: string,
+  url: string,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal,
+  totalMs?: number,
+  extraHeaders?: Record<string, string>,
+) => {
+  const releases: Array<() => void> = [];
+  try {
+    const request = await openDownloadResponse(url, {
+      signal,
+      headers: { ...headers, ...extraHeaders },
+      totalMs,
+      authorizeUrl: headers
+        ? async target => {
+            const release = await authorizeResource(jobKey, target, headers);
+            releases.push(release);
+            return release.url || target;
+          }
+        : undefined,
+    });
+    return {
+      ...request,
+      dispose: () => {
+        request.dispose();
+        releases.forEach(release => release());
+      },
+    };
+  } catch (error) {
+    releases.forEach(release => release());
+    throw error;
+  }
 };
 
 const activeAborts = new Map<string, Set<AbortController>>();
@@ -94,12 +205,18 @@ const fetchWithRetry = async (
   expectedRange?: ExpectedRange,
   maxBufferedBytes?: number,
   writeChunk?: (chunk: Uint8Array, offset: number) => void,
+  onActivity?: (activity: 'receiving' | 'retrying') => void,
 ): Promise<ArrayBuffer> => {
   for (let attempt = 0; attempt < retries; attempt++) {
+    let request: Awaited<ReturnType<typeof openDownloadResponse>> | undefined;
     try {
-      const timeoutSignal = AbortSignal.timeout(SEGMENT_TIMEOUT_MS);
-      const combined = AbortSignal.any([signal, timeoutSignal]);
-      const res = await fetch(url, { signal: combined, credentials: 'include', headers: extraHeaders });
+      request = await openDownloadResponse(url, { signal, headers: extraHeaders, totalMs: 10 * 60_000 });
+      const res = request.response;
+      onActivity?.('receiving');
+      if (!res.ok) {
+        await res.body?.cancel();
+        throw new HttpRequestError(res.status, url);
+      }
       flowLog('worker.fetch.response', {
         url: safeUrl(url),
         attempt: attempt + 1,
@@ -117,14 +234,6 @@ const fetchWithRetry = async (
         await res.body?.cancel();
         throw error;
       }
-      // Fast path: no per-byte progress wanted — let fetch buffer the body
-      // (slightly more efficient than streaming + concatenating manually).
-      if (!onBytes && !maxBufferedBytes && !writeChunk) {
-        const body = await res.arrayBuffer();
-        assertCompleteResponse(res, body.byteLength);
-        if (expectedRange) assertRangeResponse(res, expectedRange, body.byteLength);
-        return body;
-      }
       // Streaming path: read the body in chunks so the worker can report
       // bytes-per-connection live. Used by the HTTP range download path so
       // the standalone window can show "Fetching · 3.2/8 MB" per chunk.
@@ -136,21 +245,26 @@ const fetchWithRetry = async (
       const parts: Uint8Array[] = [];
       let total = 0;
       onBytes?.(0); // signal "starting" so a retry resets a prior partial count
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (expectedRange && total + value.byteLength > expectedRange.end - expectedRange.start + 1) {
-          await reader.cancel();
-          throw new RangeResponseError('Range response exceeded the requested interval');
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          request.touch();
+          if (expectedRange && total + value.byteLength > expectedRange.end - expectedRange.start + 1) {
+            await reader.cancel();
+            throw new RangeResponseError('Range response exceeded the requested interval');
+          }
+          if (writeChunk) writeChunk(value, total);
+          else parts.push(value);
+          total += value.byteLength;
+          if (maxBufferedBytes && total > maxBufferedBytes) {
+            await reader.cancel();
+            throw new Error('Encrypted HLS segment exceeds the 32 MiB buffer limit');
+          }
+          onBytes?.(total);
         }
-        if (writeChunk) writeChunk(value, total);
-        else parts.push(value);
-        total += value.byteLength;
-        if (maxBufferedBytes && total > maxBufferedBytes) {
-          await reader.cancel();
-          throw new Error('Encrypted HLS segment exceeds the 32 MiB buffer limit');
-        }
-        onBytes?.(total);
+      } finally {
+        await reader.cancel().catch(() => undefined);
       }
       assertCompleteResponse(res, total);
       if (expectedRange) assertRangeResponse(res, expectedRange, total);
@@ -163,11 +277,15 @@ const fetchWithRetry = async (
       }
       return out.buffer;
     } catch (err) {
-      flowLog('worker.fetch.retry', { url: safeUrl(url), attempt: attempt + 1, error: errorInfo(err) });
+      const reason = request?.signal.aborted ? request.signal.reason : err;
+      flowLog('worker.fetch.retry', { url: safeUrl(url), attempt: attempt + 1, error: errorInfo(reason) });
       if (signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
-      if (err instanceof RangeResponseError) throw err;
-      if (attempt === retries - 1) throw err;
-      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      if (reason instanceof RangeResponseError) throw reason;
+      if (attempt === retries - 1 || !retryableRequest(reason)) throw reason;
+      onActivity?.('retrying');
+      await new Promise(r => setTimeout(r, 500 * 2 ** attempt));
+    } finally {
+      request?.dispose();
     }
   }
   throw new Error('Unreachable');
@@ -184,7 +302,12 @@ const parallelFetchToOpfs = async (args: {
   jobId: string;
   opfsName: string;
   count: number;
-  fetchOne: (i: number, signal: AbortSignal, onBytes?: (downloaded: number) => void) => Promise<ArrayBuffer>;
+  fetchOne: (
+    i: number,
+    signal: AbortSignal,
+    onBytes?: (downloaded: number) => void,
+    onActivity?: (activity: 'receiving' | 'retrying') => void,
+  ) => Promise<ArrayBuffer>;
   stage: 'download-video' | 'download-audio';
   jobKey: string;
   signal: AbortSignal;
@@ -194,6 +317,7 @@ const parallelFetchToOpfs = async (args: {
   maxConcurrent?: number;
   onChunkDone?: (chunk: ChunkProgress) => void;
   stagedPartName?: (index: number) => string;
+  onPartAppended?: (index: number) => void;
 }): Promise<void> => {
   const { jobId, opfsName, count, fetchOne, stage, jobKey, signal, totalEstimatedBytes, chunkMeta, resumeChunks } =
     args;
@@ -224,15 +348,22 @@ const parallelFetchToOpfs = async (args: {
     return { i, start: m.start, end: m.end, downloaded: 0, status: 'pending' as const };
   });
   let completedCount = chunkStates?.filter(c => c.status === 'done').length ?? 0;
+  const partialBytes = new Map<number, number>();
+  const activities = new Map<number, 'waiting-network' | 'receiving' | 'retrying'>();
+  let completedBytes = chunkStates?.filter(c => c.status === 'done').reduce((sum, c) => sum + c.downloaded, 0) ?? 0;
+  const receivedBytes = () => completedBytes + [...partialBytes.values()].reduce((sum, bytes) => sum + bytes, 0);
 
   const flushInOrder = (): void => {
     while (pending.has(nextToWrite)) {
       const buf = pending.get(nextToWrite)!;
       pending.delete(nextToWrite);
       if (typeof buf === 'string') {
-        opfs.copyAppend(buf, opfsName);
-        void opfs.remove(buf);
+        if (buf) {
+          opfs.copyAppend(buf, opfsName);
+          void opfs.remove(buf);
+        }
       } else opfs.append(opfsName, buf);
+      args.onPartAppended?.(nextToWrite);
       nextToWrite++;
     }
   };
@@ -243,10 +374,18 @@ const parallelFetchToOpfs = async (args: {
     if (chunkStates && chunkStates[index] && chunkStates[index].status === 'done') return;
     if (chunkStates && chunkStates[index]) chunkStates[index].status = 'fetching';
     const onBytes = (downloaded: number): void => {
+      partialBytes.set(index, downloaded);
       if (chunkStates && chunkStates[index]) chunkStates[index].downloaded = downloaded;
     };
+    let release: (() => void) | undefined;
+    activities.set(index, 'waiting-network');
     try {
-      const data = await fetchOne(index, fetchSignal, onBytes);
+      release = await downloadConnections.acquire(jobKey, fetchSignal);
+      activities.set(index, 'receiving');
+      fetchSignal.throwIfAborted();
+      const data = await fetchOne(index, fetchSignal, onBytes, activity => activities.set(index, activity));
+      completedBytes += partialBytes.get(index) ?? data.byteLength;
+      partialBytes.delete(index);
       if (chunkMeta) {
         // Range download: write each chunk directly at its byte offset so
         // chunks can complete out of order without head-of-line blocking,
@@ -276,9 +415,12 @@ const parallelFetchToOpfs = async (args: {
             if (c.status === 'fetching') return sum + c.downloaded;
             return sum;
           }, 0)
-        : opfs.size(opfsName);
+        : receivedBytes();
       const estimatedBytes =
-        totalEstimatedBytes ?? (completedCount > 0 ? Math.round((fetchedBytes / completedCount) * count) : undefined);
+        totalEstimatedBytes ??
+        (completedCount > 0
+          ? Math.round(((chunkStates ? fetchedBytes : completedBytes) / completedCount) * count)
+          : undefined);
       post({
         type: 'progress',
         jobId,
@@ -287,11 +429,22 @@ const parallelFetchToOpfs = async (args: {
         downloadedBytes: fetchedBytes,
         estimatedBytes,
         chunks: chunkStates ? chunkStates.map(c => ({ ...c })) : undefined,
+        completedParts: completedCount,
+        totalParts: count,
+        activity:
+          [...activities.values()].includes('receiving') || activities.size === 0
+            ? 'receiving'
+            : [...activities.values()].includes('retrying')
+              ? 'retrying'
+              : 'waiting-network',
       });
     } catch (err) {
       if (chunkStates && chunkStates[index]) chunkStates[index].status = 'error';
       errors.push(err instanceof Error ? err : new Error(String(err)));
-      siblings.abort();
+      siblings.abort(err);
+    } finally {
+      activities.delete(index);
+      release?.();
     }
   };
 
@@ -306,9 +459,12 @@ const parallelFetchToOpfs = async (args: {
           if (c.status === 'fetching') return sum + c.downloaded;
           return sum;
         }, 0)
-      : opfs.size(opfsName);
+      : receivedBytes();
     const estBytes =
-      totalEstimatedBytes ?? (completedCount > 0 ? Math.round((fetchedBytes / completedCount) * count) : undefined);
+      totalEstimatedBytes ??
+      (completedCount > 0
+        ? Math.round(((chunkStates ? fetchedBytes : completedBytes) / completedCount) * count)
+        : undefined);
     post({
       type: 'progress',
       jobId,
@@ -317,6 +473,14 @@ const parallelFetchToOpfs = async (args: {
       downloadedBytes: fetchedBytes,
       estimatedBytes: estBytes,
       chunks: chunkStates ? chunkStates.map(c => ({ ...c })) : undefined,
+      completedParts: completedCount,
+      totalParts: count,
+      activity:
+        [...activities.values()].includes('receiving') || activities.size === 0
+          ? 'receiving'
+          : [...activities.values()].includes('retrying')
+            ? 'retrying'
+            : 'waiting-network',
     });
   };
   const snapshotHandle: ReturnType<typeof setInterval> = setInterval(postSnapshot, 500);
@@ -363,11 +527,16 @@ const handleFetchSegments = async (req: FetchSegmentsRequest): Promise<void> => 
   const { jobId, jobKey, opfsName, segments, initUrl, keyHeaders, stage } = req;
   const partNames = segments.map((_, index) => `${opfsName}.part-${index}`);
 
+  diagnosticFiles.set(jobId, opfsName);
   try {
     await opfs.open(opfsName);
 
     if (initUrl) {
-      const release = await authorizeResource(jobKey, initUrl, keyHeaders);
+      const releaseConnection = await downloadConnections.acquire(jobKey, controller.signal);
+      const release = await authorizeResource(jobKey, initUrl, keyHeaders).catch(error => {
+        releaseConnection();
+        throw error;
+      });
       try {
         const init = await fetchWithRetry(
           initUrl,
@@ -384,10 +553,18 @@ const handleFetchSegments = async (req: FetchSegmentsRequest): Promise<void> => 
         opfs.append(opfsName, init);
       } finally {
         release();
+        releaseConnection();
       }
     }
 
-    const fetchOne = async (i: number, signal: AbortSignal): Promise<ArrayBuffer> => {
+    let nextDirectPart = 0;
+    const directParts = new Set<number>();
+    const fetchOne = async (
+      i: number,
+      signal: AbortSignal,
+      onBytes?: (bytes: number) => void,
+      onActivity?: (activity: 'receiving' | 'retrying') => void,
+    ): Promise<ArrayBuffer> => {
       const spec: SegmentSpec = segments[i];
       const release = await authorizeResource(jobKey, spec.url, keyHeaders);
       try {
@@ -401,7 +578,7 @@ const handleFetchSegments = async (req: FetchSegmentsRequest): Promise<void> => 
               ...(spec.range ? { Range: `bytes=${spec.range.start}-${spec.range.end}` } : {}),
             },
             MAX_RETRIES,
-            undefined,
+            onBytes,
             spec.range,
             32 * 1024 * 1024,
           );
@@ -416,44 +593,76 @@ const handleFetchSegments = async (req: FetchSegmentsRequest): Promise<void> => 
           await opfs.open(partNames[i]);
           opfs.append(partNames[i], data);
         } else {
-          // Stage out-of-order parts on disk, not in a JS Map of media buffers.
+          const direct = i === nextDirectPart;
+          const destination = direct ? opfsName : partNames[i];
+          const start = direct ? opfs.size(opfsName) : 0;
+          const writer = new BufferedWriter((position, bytes) => opfs.writeAt(destination, position, bytes));
           for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            let request: Awaited<ReturnType<typeof openDownloadResponse>> | undefined;
             try {
-              await opfs.open(partNames[i]);
-              const response = await fetch(spec.url, {
-                signal: AbortSignal.any([signal, AbortSignal.timeout(SEGMENT_TIMEOUT_MS)]),
-                credentials: 'include',
-                headers: {
-                  ...headersForFetch(keyHeaders, spec.url),
-                  ...(spec.range ? { Range: `bytes=${spec.range.start}-${spec.range.end}` } : {}),
-                },
-              });
-              try {
-                assertSuccessfulResponse(response);
-                if (spec.range) assertRangeResponse(response, spec.range);
-              } catch (error) {
+              writer.discard();
+              if (direct) opfs.truncate(opfsName, start);
+              else await opfs.open(destination);
+              onBytes?.(0);
+              request = await openAuthorizedResponse(
+                jobKey,
+                spec.url,
+                keyHeaders,
+                signal,
+                10 * 60_000,
+                spec.range ? { Range: `bytes=${spec.range.start}-${spec.range.end}` } : undefined,
+              );
+              const response = request.response;
+              onActivity?.('receiving');
+              if (!response.ok) {
                 await response.body?.cancel();
-                throw error;
+                throw new HttpRequestError(response.status, spec.url);
               }
+              if (spec.range) assertRangeResponse(response, spec.range);
               if (!response.body) throw new Error('No segment response body');
               const reader = response.body.getReader();
               let bytes = 0;
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                if (spec.range && bytes + value.byteLength > spec.range.end - spec.range.start + 1) {
-                  await reader.cancel();
-                  throw new RangeResponseError('HLS range body exceeds the requested interval');
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  request.touch();
+                  if (spec.range && bytes + value.byteLength > spec.range.end - spec.range.start + 1)
+                    throw new RangeResponseError('HLS range body exceeds the requested interval');
+                  writer.writeAt(start + bytes, value);
+                  bytes += value.byteLength;
+                  onBytes?.(bytes);
                 }
-                opfs.append(partNames[i], value);
-                bytes += value.byteLength;
+              } finally {
+                await reader.cancel();
               }
               assertCompleteResponse(response, bytes);
               if (spec.range) assertRangeResponse(response, spec.range, bytes);
               assertNonEmptyOutput(bytes);
+              writer.flush();
+              if (direct) directParts.add(i);
               break;
             } catch (error) {
-              if (signal.aborted || attempt === MAX_RETRIES - 1) throw error;
+              writer.discard();
+              const reason = request?.signal.aborted ? request.signal.reason : error;
+              flowLog('hls.segment.retry', {
+                jobKey,
+                part: i,
+                url: spec.url,
+                attempt: attempt + 1,
+                error: errorInfo(reason),
+              });
+              if (
+                signal.aborted ||
+                attempt === MAX_RETRIES - 1 ||
+                reason instanceof RangeResponseError ||
+                !retryableRequest(reason)
+              )
+                throw reason;
+              onActivity?.('retrying');
+              await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+            } finally {
+              request?.dispose();
             }
           }
         }
@@ -471,7 +680,11 @@ const handleFetchSegments = async (req: FetchSegmentsRequest): Promise<void> => 
       stage,
       jobKey,
       signal: controller.signal,
-      stagedPartName: index => partNames[index],
+      maxConcurrent: req.maxConnections,
+      stagedPartName: index => (directParts.has(index) ? '' : partNames[index]),
+      onPartAppended: index => {
+        nextDirectPart = index + 1;
+      },
     });
 
     const totalBytes = opfs.size(opfsName);
@@ -496,6 +709,7 @@ const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
   registerAbort(req.jobKey, controller);
   const { jobId, jobKey, opfsName, url, ranges, stage, totalBytes: knownTotal, keyHeaders } = req;
 
+  diagnosticFiles.set(jobId, opfsName);
   try {
     flowLog('worker.ranges.start', {
       url: safeUrl(url),
@@ -511,9 +725,16 @@ const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
       opfs.size(opfsName),
     );
     if (!resumeChunks) opfs.truncate(opfsName, 0);
+    await opfs.reserve(opfsName, knownTotal);
 
-    const fetchOne = (i: number, signal: AbortSignal, onBytes?: (downloaded: number) => void): Promise<ArrayBuffer> => {
+    const fetchOne = (
+      i: number,
+      signal: AbortSignal,
+      onBytes?: (downloaded: number) => void,
+      onActivity?: (activity: 'receiving' | 'retrying') => void,
+    ): Promise<ArrayBuffer> => {
       const { start, end } = ranges[i];
+      const writer = new BufferedWriter((position, bytes) => opfs.writeAt(opfsName, position, bytes));
       return fetchWithRetry(
         url,
         signal,
@@ -523,11 +744,24 @@ const handleFetchRanges = async (req: FetchRangesRequest): Promise<void> => {
           ...(req.resourceVersion ? { 'If-Range': req.resourceVersion } : {}),
         },
         MAX_RETRIES,
-        onBytes,
+        downloaded => {
+          if (downloaded === 0) writer.discard();
+          onBytes?.(downloaded);
+        },
         { start, end, total: knownTotal, resourceVersion: req.resourceVersion },
         undefined,
         (chunk, offset) => {
-          opfs.writeAt(opfsName, start + offset, chunk);
+          writer.writeAt(start + offset, chunk);
+        },
+        onActivity,
+      ).then(
+        result => {
+          writer.flush();
+          return result;
+        },
+        error => {
+          writer.discard();
+          throw error;
         },
       );
     };
@@ -579,12 +813,15 @@ const PROGRESS_POLL_MS = 250;
 const handleMux = async (req: MuxRequest): Promise<void> => {
   const log = createLogger('mux');
   const { jobId, jobKey, outputOpfsName, plan, input, stage, durationSeconds, estimatedBytes } = req;
+  diagnosticFiles.set(jobId, outputOpfsName);
   const ffmpegArgs = buildMediaProcessingArgs(plan, input, outputOpfsName);
   const controller = new AbortController();
   registerAbort(jobKey, controller);
 
+  let releaseMux: (() => void) | undefined;
   let libav: Awaited<ReturnType<typeof createLibAV>> | null = null;
   let pollHandle: ReturnType<typeof setInterval> | null = null;
+  let stalledTimer: ReturnType<typeof setInterval> | undefined;
 
   const onAbort = (): void => {
     // libav.terminate() rejects the in-flight ffmpeg() promise on the next tick.
@@ -597,6 +834,9 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
   controller.signal.addEventListener('abort', onAbort);
 
   try {
+    post({ type: 'progress', jobId, jobKey, stage, downloadedBytes: 0, estimatedBytes, activity: 'waiting-mux' });
+    releaseMux = await mergeSlots.acquire(jobKey, controller.signal);
+    controller.signal.throwIfAborted();
     log.debug('starting', {
       planType: plan.type,
       inputCount: input.urls.length,
@@ -606,6 +846,7 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
     libav = await createLibAV();
     controller.signal.throwIfAborted();
     log.debug('libav.created');
+    await opfs.reserve(outputOpfsName, estimatedBytes ?? 0);
     await registerOutputDevice(libav, outputOpfsName);
     await registerJsfetch(libav, {});
     controller.signal.throwIfAborted();
@@ -631,6 +872,16 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
     // Stream-copy mux (.mp4 etc.) produces output ≈ input, so OPFS file size
     // is a reliable proxy.
     const isMp3Transcode = outputOpfsName.endsWith('.mp3');
+    let lastOutputAt = Date.now();
+    let previousWrites = 0;
+    stalledTimer = setInterval(() => {
+      const writes = opfs.stats(outputOpfsName)?.bytesWritten ?? 0;
+      if (writes !== previousWrites) {
+        previousWrites = writes;
+        lastOutputAt = Date.now();
+      } else if (Date.now() - lastOutputAt >= 120_000)
+        controller.abort(new Error('Media processing stalled: no output for 120 seconds'));
+    }, 1000);
 
     pollHandle = setInterval(() => {
       (async () => {
@@ -690,13 +941,16 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = null;
 
+    flushOutputDevice(libav);
     const totalBytes = opfs.size(outputOpfsName);
     assertNonEmptyOutput(totalBytes);
     await opfs.close(outputOpfsName);
     log.debug('completed', { totalBytes });
     post({ type: 'mux-done', jobId, outputOpfsName, totalBytes });
   } catch (err) {
-    log.error('failed', { error: err });
+    const reason = controller.signal.aborted ? controller.signal.reason : err;
+    flowLog('mux.failed', { key: jobKey, error: errorInfo(reason) });
+    log.error('failed', { error: reason });
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = null;
     try {
@@ -704,8 +958,10 @@ const handleMux = async (req: MuxRequest): Promise<void> => {
     } catch {
       /* ignore */
     }
-    post({ type: 'error', jobId, error: err instanceof Error ? err.message : String(err) });
+    post({ type: 'error', jobId, error: reason instanceof Error ? reason.message : String(reason) });
   } finally {
+    clearInterval(stalledTimer);
+    releaseMux?.();
     controller.signal.removeEventListener('abort', onAbort);
     if (pollHandle) clearInterval(pollHandle);
     try {
@@ -721,7 +977,11 @@ const handleFetchUrl = async (req: FetchUrlRequest): Promise<void> => {
   const controller = new AbortController();
   registerAbort(req.jobKey, controller);
   const { jobId, jobKey, opfsName, url, stage, keyHeaders } = req;
+  let request: Awaited<ReturnType<typeof openDownloadResponse>> | undefined;
+  let releaseConnection: (() => void) | undefined;
+  const writer = new BufferedWriter((position, bytes) => opfs.writeAt(opfsName, position, bytes));
 
+  diagnosticFiles.set(jobId, opfsName);
   try {
     flowLog('worker.stream.start', {
       url: safeUrl(url),
@@ -729,11 +989,9 @@ const handleFetchUrl = async (req: FetchUrlRequest): Promise<void> => {
       headerNames: Object.keys(keyHeaders ?? {}),
     });
     await opfs.open(opfsName);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      credentials: 'include',
-      headers: headersForFetch(keyHeaders, url),
-    });
+    releaseConnection = await downloadConnections.acquire(jobKey, controller.signal);
+    request = await openAuthorizedResponse(jobKey, url, keyHeaders, controller.signal);
+    const res = request.response;
     assertSuccessfulResponse(res);
     if (!res.body) throw new Error('No response body');
 
@@ -745,13 +1003,15 @@ const handleFetchUrl = async (req: FetchUrlRequest): Promise<void> => {
       const { done, value } = await reader.read();
       if (done) break;
       if (controller.signal.aborted) throw new DOMException('Download cancelled', 'AbortError');
-      opfs.append(opfsName, value);
+      request.touch();
+      writer.writeAt(downloaded, value);
       downloaded += value.byteLength;
       post({ type: 'progress', jobId, jobKey, stage, downloadedBytes: downloaded, estimatedBytes });
     }
 
     assertCompleteResponse(res, downloaded);
     assertNonEmptyOutput(downloaded);
+    writer.flush();
     await opfs.close(opfsName);
     post({ type: 'fetch-done', jobId, opfsName, totalBytes: downloaded });
     flowLog('worker.stream.done', { url: safeUrl(url), totalBytes: downloaded });
@@ -762,8 +1022,16 @@ const handleFetchUrl = async (req: FetchUrlRequest): Promise<void> => {
     } catch {
       /* ignore */
     }
-    post({ type: 'error', jobId, error: err instanceof Error ? err.message : String(err) });
+    const reason = request?.signal.aborted
+      ? request.signal.reason
+      : controller.signal.aborted
+        ? controller.signal.reason
+        : err;
+    post({ type: 'error', jobId, error: reason instanceof Error ? reason.message : String(reason) });
   } finally {
+    request?.dispose();
+    releaseConnection?.();
+    writer.discard();
     unregisterAbort(jobKey, controller);
   }
 };
@@ -776,7 +1044,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
       const pending = pendingAuthorization.get(req.authorizationId);
       pendingAuthorization.delete(req.authorizationId);
       if (req.error) pending?.reject(new Error(req.error));
-      else pending?.resolve(req.downloadKey);
+      else pending?.resolve({ key: req.downloadKey, url: req.url ?? '' });
       return;
     }
     case 'ping':

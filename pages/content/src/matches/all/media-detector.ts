@@ -427,32 +427,14 @@ export const initMediaDetector = (): (() => void) => {
   // the player enters fullscreen or layout reflows.
   window.addEventListener('resize', scanMainVideoPresence, { passive: true });
 
-  // Only the top frame should signal pagehide/CLEAR_TAB. Sub-frames (JWPlayer
-  // ad containers, embedded players, etc.) unload independently during normal
-  // playback — e.g. when a pre-roll ad iframe is destroyed — and we mustn't
-  // wipe the parent tab's detections (the real HLS source) when that happens.
-  const isTopFrame = (() => {
-    try {
-      return window.top === window;
-    } catch {
-      // Cross-origin top access throws — we're in a sub-frame.
-      return false;
-    }
-  })();
-
-  const onPageHide = () => {
-    if (isTopFrame) {
-      publishMainVideoPresence(false);
-      chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CLEAR_TAB }).catch(() => undefined);
-    }
-  };
-  window.addEventListener('pagehide', onPageHide);
+  // The background owns document cleanup through webNavigation.onCommitted.
+  // A pagehide message can arrive after the replacement document's one-shot
+  // HLS request and erase its detection, so this script never clears the tab.
 
   return () => {
     detectorActive = false;
     observer.disconnect();
     window.removeEventListener('resize', scanMainVideoPresence);
-    window.removeEventListener('pagehide', onPageHide);
     mseSendScheduler.cancelAll();
     for (const [element, handler] of registeredElements) {
       ['loadedmetadata', 'canplay', 'play', 'durationchange', 'timeupdate'].forEach(event => {

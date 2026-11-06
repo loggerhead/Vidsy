@@ -1,5 +1,24 @@
 # Live media download diagnostics
 
+## Large-file libav regression
+
+Build the pinned runtime with Emscripten 4.0.5 activated, then test the installed
+runtime:
+
+```sh
+bash tools/media-remux/build-libav.sh
+node tools/media-remux/test-libav-large-offsets.mjs
+```
+
+The regression checks the actual WASM import signatures and generated JavaScript
+bridge, then runs FFmpeg stream copy against sparse HTTP MP4 files with metadata
+beyond 2 GiB, the ATID failure offset, 4 GiB, and 5 GiB. It verifies successful
+output, large positive Range offsets, bounded transferred bytes, and absence of
+requests at or beyond EOF. The fixture is `.media-test/fixtures/direct.mp4`.
+This tests large input positions without allocating or downloading gigabytes;
+it does not measure sustained large-file throughput or replay an authenticated
+live source.
+
 The Bilibili diagnostic launches a fresh Chrome profile, loads the current WXT
 unpacked output from `.output/chrome-mv3`, attaches to the page and Vidsy service worker, and writes a JSONL
 trace containing page state, console errors, network requests, detections,

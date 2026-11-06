@@ -99,6 +99,9 @@ export type MediaDownloadProgress = {
   downloadedBytes: number;
   estimatedBytes?: number;
   muxPercent?: number;
+  activity?: 'waiting-network' | 'receiving' | 'retrying' | 'waiting-mux' | 'verifying';
+  completedParts?: number;
+  totalParts?: number;
   error?: string;
   downloadId?: number; // chrome.downloads ID for Play / Show in Folder
   item?: MediaItem; // snapshot of the source item — powers the Downloads tab and Retry
@@ -203,7 +206,7 @@ export type MediaMessage =
   | { type: typeof MEDIA_MESSAGE.MAIN_VIDEO_PRESENT; payload: { present: boolean } }
   | {
       type: typeof MEDIA_MESSAGE.PRESENTATION_METADATA;
-      payload: { itemId: string; thumbnailUrl: string | null; duration?: number };
+      payload: { itemId: string; thumbnailUrl?: string | null; duration?: number };
     }
   | { type: typeof MEDIA_MESSAGE.PASTE_URL; payload: { url: string; tabId?: number } }
   | { type: typeof MEDIA_MESSAGE.PICKER_START; payload?: { tabId?: number } }

@@ -1,13 +1,11 @@
 import { DownloadProgress } from './DownloadProgress';
-import { IconDownload, IconX, IconEdit, IconMoreVert, IconVideo, IconPlay, IconFolder, IconLock } from './icons';
+import { IconDownload, IconX, IconEdit, IconMoreVert, IconVideo, IconFolder, IconLock, IconRefresh } from './icons';
 import { MenuItem } from './MenuItem';
 import { QrCodeModal } from './QrCodeModal';
 import { cn } from '../../utils';
 import {
   MEDIA_MESSAGE,
   isMobileShareableUrl,
-  kindBadgeColor,
-  mediaBadgeLabel,
   pickBestVariant,
   shortEdgeLabel,
   formatDuration,
@@ -146,13 +144,6 @@ export const MediaCard = ({
               <IconVideo />
             </div>
           )}
-          <span
-            className={cn(
-              'absolute left-1.5 top-1.5 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none shadow-sm backdrop-blur-md',
-              kindBadgeColor(item.kind, isLight),
-            )}>
-            {mediaBadgeLabel(item)}
-          </span>
           {durationStr ? (
             <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-white backdrop-blur-sm">
               {durationStr}
@@ -242,24 +233,28 @@ export const MediaCard = ({
           ) : isComplete ? (
             <div className="flex items-center gap-1.5">
               <button
-                className={cn(
-                  'flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition',
-                  isLight
-                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                    : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25',
-                )}
-                onClick={() => chrome.runtime.sendMessage({ type: 'media/open', downloadId: progress.downloadId })}>
-                <IconPlay /> Play
+                className="flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-emerald-600"
+                onClick={() => chrome.runtime.sendMessage({ type: 'media/show', downloadId: progress.downloadId })}>
+                <IconFolder /> Show in Folder
               </button>
               <button
                 className={cn(
-                  'flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition',
+                  'rounded-md p-1.5 transition',
                   isLight
                     ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     : 'bg-white/[0.06] text-gray-300 hover:bg-white/[0.1]',
                 )}
-                onClick={() => chrome.runtime.sendMessage({ type: 'media/show', downloadId: progress.downloadId })}>
-                <IconFolder /> Show in Folder
+                title="Download again"
+                aria-label="Download again"
+                onClick={() =>
+                  chrome.runtime
+                    .sendMessage({
+                      type: MEDIA_MESSAGE.CONTROL,
+                      payload: { key: progress.key, intent: 'again', requestId: crypto.randomUUID() },
+                    })
+                    .catch(() => undefined)
+                }>
+                <IconRefresh />
               </button>
             </div>
           ) : isBusy && progress ? (

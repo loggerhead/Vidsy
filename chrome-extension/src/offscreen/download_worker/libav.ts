@@ -2,6 +2,7 @@
 // Runs inside the download worker. Binds libav's mkwriterdev onwrite callback
 // to OPFS writeAt() so mux output never lands in WASM MEMFS.
 
+import { BufferedWriter } from './buffered-writer';
 import { installLibAVGlobals } from './libav-globals';
 import { opfs } from './opfs';
 import { createLogger } from '@extension/shared';
@@ -55,6 +56,8 @@ const loadWrapper = async (): Promise<LibAVWrapper> => {
   return wrapperPromise;
 };
 
+const outputWriters = new WeakMap<LibAVInstance, BufferedWriter>();
+
 export const createLibAV = async (): Promise<LibAVInstance> => {
   const wrapper = await loadWrapper();
   // noworker:true keeps libav on this (download) worker thread. The nested-worker
@@ -73,14 +76,20 @@ export const createLibAV = async (): Promise<LibAVInstance> => {
 // Wire the output device: every libav onwrite(name, pos, buf) becomes an
 // OPFS writeAt at the exact offset libav requested. Random-offset writes
 // (e.g. -movflags +faststart moov patch-up) land correctly thanks to Phase 1.
+export const flushOutputDevice = (libav: LibAVInstance): void => {
+  outputWriters.get(libav)?.flush();
+};
+
 export const registerOutputDevice = async (libav: LibAVInstance, opfsName: string): Promise<void> => {
   await opfs.open(opfsName);
+  const writer = new BufferedWriter((position, bytes) => opfs.writeAt(opfsName, position, bytes));
+  outputWriters.set(libav, writer);
   let writeCount = 0;
   let bytesWritten = 0;
   libav.onwrite = (name, pos, buf) => {
     if (name !== opfsName) return;
     try {
-      opfs.writeAt(opfsName, pos, buf);
+      writer.writeAt(pos, buf);
       writeCount++;
       bytesWritten += buf.byteLength;
       if (writeCount === 1 || writeCount % 100 === 0) {

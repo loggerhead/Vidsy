@@ -1,6 +1,7 @@
 import type { MediaItem } from '@extension/shared';
 
 type PlayerEvidence = {
+  currentSrc?: string;
   sourceUrls: string[];
   posterUrl: string;
   pageUrl: string;
@@ -66,25 +67,64 @@ const groupXRenditions = (items: MediaItem[]): MediaItem | undefined => {
 
 type PlayerMediaResolution = { item: MediaItem; authority: 'source' | 'poster' | 'unique-presentation' };
 
+const presentationThumbnailUrl = (
+  resolution: PlayerMediaResolution | undefined,
+  player: PlayerEvidence | undefined,
+  pageImageUrl: string | undefined,
+): string | null | undefined => {
+  if (!resolution || !player) return undefined;
+  if (resolution.authority !== 'unique-presentation') return player.posterUrl || null;
+  // A blob source cannot identify its download URL. Use page-level artwork
+  // only after the resolver has found one player and one item on this page.
+  if (player.playerCount !== 1 || resolution.item.pageUrl !== player.pageUrl) return undefined;
+  const imageUrl = player.posterUrl || pageImageUrl;
+  if (!imageUrl) return undefined;
+  try {
+    const absolute = new URL(imageUrl, player.pageUrl);
+    return absolute.protocol === 'http:' || absolute.protocol === 'https:' ? absolute.href : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const resolvePlayerMedia = (items: MediaItem[], player: PlayerEvidence): PlayerMediaResolution | undefined => {
   const candidates = items.filter(item => item.kind !== 'mse' && item.kind !== 'audio' && item.kind !== 'subtitle');
-  const sources = new Set(player.sourceUrls.filter(url => url && !url.startsWith('blob:')));
-  if (sources.size) {
-    const item = unique(
-      candidates.filter(item =>
-        [item.url, ...(item.variants?.map(v => v.url) ?? []), ...(item.hlsChildUrls ?? [])].some(url =>
-          sources.has(url),
-        ),
-      ),
+  const matchesForSources = (sources: Set<string>) =>
+    candidates.filter(item =>
+      [item.url, ...(item.variants?.map(v => v.url) ?? []), ...(item.hlsChildUrls ?? [])].some(url => sources.has(url)),
     );
+  const posterAssetId = xAssetId(player.posterUrl);
+  const posterMatch = () => {
+    if (!posterAssetId) return undefined;
+    const matches = candidates.filter(
+      item => xAssetId(item.url) === posterAssetId || item.variants?.some(v => xAssetId(v.url) === posterAssetId),
+    );
+    return unique(matches) ?? groupXRenditions(matches);
+  };
+
+  // currentSrc is the rendition actually playing; src and <source> may list
+  // alternatives or stale values from a recycled player.
+  if (player.currentSrc && !player.currentSrc.startsWith('blob:')) {
+    const matches = matchesForSources(new Set([player.currentSrc]));
+    if (matches.length === 1) return { item: matches[0], authority: 'source' };
+    if (matches.length > 1) return undefined;
+    // A changed X rendition URL can still identify the same asset as the poster.
+    if (posterAssetId && xAssetId(player.currentSrc) === posterAssetId) {
+      const item = posterMatch();
+      return item ? { item, authority: 'poster' } : undefined;
+    }
+    return undefined;
+  }
+
+  const sources = new Set(
+    player.currentSrc?.startsWith('blob:') ? [] : player.sourceUrls.filter(url => url && !url.startsWith('blob:')),
+  );
+  if (sources.size) {
+    const item = unique(matchesForSources(sources));
     return item ? { item, authority: 'source' } : undefined;
   }
-  const assetId = xAssetId(player.posterUrl);
-  if (assetId) {
-    const matches = candidates.filter(
-      item => xAssetId(item.url) === assetId || item.variants?.some(v => xAssetId(v.url) === assetId),
-    );
-    const item = unique(matches) ?? groupXRenditions(matches);
+  if (posterAssetId) {
+    const item = posterMatch();
     return item ? { item, authority: 'poster' } : undefined;
   }
   // A single-player document can own one manifest or provider-extracted
@@ -139,5 +179,5 @@ const selectVisiblePlayer = <T extends { rect: PlayerBox; playing: boolean }>(
         : best;
     }, undefined);
 
-export { resolvePlayerMedia, selectVisiblePlayer, visiblePlayerArea };
+export { presentationThumbnailUrl, resolvePlayerMedia, selectVisiblePlayer, visiblePlayerArea };
 export type { PlayerEvidence, PlayerBox, PlayerMediaResolution };

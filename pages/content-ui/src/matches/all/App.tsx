@@ -3,24 +3,30 @@ import { InterceptModal } from './components/InterceptModal';
 import { PillBar } from './components/PillBar';
 import { FONT } from './components/tokens';
 import { buildDownloadMessage } from './lib/download-request';
-import { ACTIVE_STAGES, pickBestVariant, buildRows } from './lib/media-helpers';
-import { resolvePlayerMedia, selectVisiblePlayer, visiblePlayerArea } from './lib/player-media';
+import { createDownloadSubscription } from './lib/download-subscription';
+import { ACTIVE_STAGES, buildRows } from './lib/media-helpers';
+import {
+  presentationThumbnailUrl,
+  resolvePlayerMedia,
+  selectVisiblePlayer,
+  visiblePlayerArea,
+} from './lib/player-media';
 import { createLogger, MEDIA_MESSAGE, useStorage } from '@extension/shared';
 import { mediaDetectionsStorage, mediaDownloadsStorage, mediaSettingsStorage } from '@extension/storage';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { VideoEntry } from './lib/media-helpers';
-import type { MediaDownloadProgress, MediaItem, MediaVariant } from '@extension/shared';
+import type { MediaItem, MediaVariant } from '@extension/shared';
 
 const log = createLogger('content-ui');
 
 const App = () => {
   const detections = useStorage(mediaDetectionsStorage);
-  const rawDownloads = useStorage(mediaDownloadsStorage);
-  const downloads = useMemo(() => (rawDownloads ?? {}) as Record<string, MediaDownloadProgress>, [rawDownloads]);
   const settings = useStorage(mediaSettingsStorage);
 
   /* tab ID via background message (chrome.tabs not available in content scripts) */
   const [tabId, setTabId] = useState<number | null>(null);
+  const downloadSubscription = useMemo(() => createDownloadSubscription(mediaDownloadsStorage, tabId), [tabId]);
+  const downloads = useSyncExternalStore(downloadSubscription.subscribe, downloadSubscription.getSnapshot);
   useEffect(() => {
     chrome.runtime
       .sendMessage({ type: 'media/get-tab-id' })
@@ -148,6 +154,17 @@ const App = () => {
       const x = Math.min(rect.right + 1, window.innerWidth - overlay.offsetWidth - 1);
       overlay.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(Math.max(0, rect.top))}px, 0)`;
       overlay.style.visibility = 'visible';
+      const panel = overlay.querySelector<HTMLElement>('.vidsy-download-panel');
+      if (panel) {
+        const y = Math.max(0, rect.top);
+        const below = y + overlay.offsetHeight + 8;
+        const panelY = Math.max(12, Math.min(below, window.innerHeight - panel.offsetHeight - 12));
+        overlay.style.setProperty('--vidsy-panel-top', `${panelY - y}px`);
+        overlay.style.setProperty(
+          '--vidsy-panel-right',
+          `${Math.min(0, x + overlay.offsetWidth - panel.offsetWidth - 12)}px`,
+        );
+      }
     };
     const requestPosition = () => {
       if (frame === null) frame = requestAnimationFrame(position);
@@ -167,6 +184,11 @@ const App = () => {
 
   useLayoutEffect(() => {
     requestPositionRef.current();
+    const panel = ref.current?.querySelector('.vidsy-download-panel');
+    if (!panel) return;
+    const observer = new ResizeObserver(() => requestPositionRef.current());
+    observer.observe(panel);
+    return () => observer.disconnect();
   }, [videos, tabItems, isHovered, open, busyUrl]);
 
   /* Download intercept: background cancels a media download and asks us to
@@ -193,10 +215,17 @@ const App = () => {
       const path = e.composedPath();
       if (ref.current && !path.includes(ref.current as unknown as EventTarget)) setOpen(false);
     };
-    const tid = setTimeout(() => document.addEventListener('mousedown', handler, true), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setOpen(false);
+      ref.current?.querySelector<HTMLButtonElement>(':scope > button')?.focus();
+    };
+    document.addEventListener('mousedown', handler, true);
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
-      clearTimeout(tid);
       document.removeEventListener('mousedown', handler, true);
+      document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [open]);
 
@@ -274,8 +303,9 @@ const App = () => {
   positionedVideoRef.current = effectiveVideo?.el ?? null;
 
   const player = effectiveVideo?.el;
-  const playerResolution = player
-    ? resolvePlayerMedia(tabItems, {
+  const playerEvidence = player
+    ? {
+        currentSrc: player.currentSrc,
         sourceUrls: [
           player.currentSrc,
           player.src,
@@ -284,25 +314,28 @@ const App = () => {
         posterUrl: player.poster,
         pageUrl: window.location.href,
         playerCount: videos.length,
-      })
+      }
     : undefined;
+  const playerResolution = playerEvidence ? resolvePlayerMedia(tabItems, playerEvidence) : undefined;
   const primary = playerResolution?.item;
   const resolvedItemId = primary?.id;
-  const resolutionAuthority = playerResolution?.authority;
-  const playerPoster = player?.poster;
+  const thumbnailUrl = presentationThumbnailUrl(
+    playerResolution,
+    playerEvidence,
+    document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content,
+  );
   const playerDuration = player?.duration;
 
   useEffect(() => {
-    if (!resolvedItemId || resolutionAuthority === 'unique-presentation') return;
-    const thumbnailUrl = playerPoster || null;
     const duration = Number.isFinite(playerDuration) && (playerDuration ?? 0) > 0 ? playerDuration : undefined;
+    if (!resolvedItemId || (thumbnailUrl === undefined && duration === undefined)) return;
     chrome.runtime
       .sendMessage({
         type: MEDIA_MESSAGE.PRESENTATION_METADATA,
         payload: { itemId: resolvedItemId, thumbnailUrl, duration },
       })
       .catch(() => undefined);
-  }, [playerDuration, playerPoster, resolutionAuthority, resolvedItemId]);
+  }, [playerDuration, resolvedItemId, thumbnailUrl]);
 
   // A recycled DOM player can change asset without changing its element.
   useEffect(() => {
@@ -316,15 +349,16 @@ const App = () => {
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
   const hasActiveProgress = !!currentProgress && ACTIVE_STAGES.has(currentProgress.stage);
   const isBusy = hasActiveProgress || busyUrl === primary.id || (!!busyUrl && currentProgress?.key === busyUrl);
-  const prog = isBusy ? (currentProgress ?? null) : null;
+  // Keep the latest terminal result available for hover details after the badge contracts.
+  const prog = currentProgress ?? null;
   const rows = buildRows([primary]);
-  const bestVariant = primary.variants?.length ? pickBestVariant(primary.variants) : undefined;
-  const expanded = isHovered || open;
+  const expanded = open;
 
   return (
     <>
       {interceptModal}
       <div
+        className="vidsy-overlay"
         ref={ref}
         onMouseEnter={() => {
           if (hoverCloseTimerRef.current !== null) {
@@ -337,7 +371,6 @@ const App = () => {
           hoverCloseTimerRef.current = setTimeout(() => {
             hoverCloseTimerRef.current = null;
             setIsHovered(false);
-            setOpen(false);
           }, 180);
         }}
         style={{
@@ -350,10 +383,24 @@ const App = () => {
           visibility: 'hidden',
           willChange: 'transform',
         }}>
-        <PillBar isBusy={isBusy} prog={prog} onExpand={() => setOpen(true)} />
+        <PillBar
+          isBusy={isBusy}
+          prog={prog}
+          expanded={expanded && !isBusy}
+          onExpand={() => setOpen(previous => !previous)}
+        />
 
         {expanded && !isBusy && (
-          <DropdownPanel rows={rows} primary={primary} bestVariant={bestVariant} onDownload={doDownload} />
+          <DropdownPanel
+            key={primary.id}
+            rows={rows}
+            primary={primary}
+            onDownload={doDownload}
+            onClose={() => {
+              setOpen(false);
+              ref.current?.querySelector<HTMLButtonElement>(':scope > button')?.focus();
+            }}
+          />
         )}
       </div>
     </>

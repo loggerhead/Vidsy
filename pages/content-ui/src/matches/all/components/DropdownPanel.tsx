@@ -1,108 +1,117 @@
-import { IcoDown } from './icons';
-import { GLASS_PANEL, GLASS_BORDER, BLUR, TEXT, MUTED, HOVER } from './tokens';
+import { IcoDown, IcoX } from './icons';
+import { groupDownloadOptions, recommendDownloadOption } from '../lib/download-options';
 import { formatSeconds } from '../lib/media-helpers';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { DownloadOption, DownloadRow } from '../lib/download-options';
 import type { MediaItem, MediaVariant } from '@extension/shared';
-
-type Row = { sub: string; item: MediaItem; variant?: MediaVariant };
 
 export const DropdownPanel = ({
   rows,
   primary,
-  bestVariant,
   onDownload,
+  onClose,
 }: {
-  rows: Row[];
+  rows: DownloadRow[];
   primary: MediaItem;
-  bestVariant?: MediaVariant;
   onDownload: (item: MediaItem, variant?: MediaVariant) => void;
-}) => (
-  <div
-    style={{
-      position: 'absolute',
-      top: '100%',
-      right: 0,
-      background: GLASS_PANEL,
-      backdropFilter: BLUR,
-      WebkitBackdropFilter: BLUR,
-      border: `1px solid ${GLASS_BORDER}`,
-      borderRadius: 10,
-      overflow: 'hidden',
-      minWidth: 280,
-      maxWidth: 300,
-      boxShadow: '0 10px 28px rgba(0,0,0,0.6)',
-    }}>
-    {/* Best quality shortcut, labelled with the video metadata. */}
-    <button
-      onClick={() => onDownload(primary, bestVariant)}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 7,
-        background: 'rgba(255,255,255,0.05)',
-        border: 'none',
-        borderBottom: `1px solid ${GLASS_BORDER}`,
-        padding: '7px 12px',
-        cursor: 'pointer',
-        textAlign: 'left',
-        color: TEXT,
-        fontSize: 11,
-        fontWeight: 700,
-      }}
-      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = HOVER)}
-      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)')}>
-      <IcoDown />
-      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {primary.title ?? primary.fileName ?? 'Video'}
-      </span>
-      <span style={{ marginLeft: 'auto', color: MUTED, fontSize: 10, flexShrink: 0 }}>
-        {formatSeconds(primary.duration)}
-      </span>
-    </button>
+  onClose: () => void;
+}) => {
+  const groups = useMemo(() => groupDownloadOptions(rows), [rows]);
+  const recommended = recommendDownloadOption(groups);
+  const [selectedKey, setSelectedKey] = useState(recommended?.key);
+  const [expandedQualities, setExpandedQualities] = useState<string[]>([]);
+  const selected = groups.flatMap(group => group.options).find(option => option.key === selectedKey) ?? recommended;
+  const titleId = useId();
+  const radioName = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
 
-    {/* Quality rows */}
-    {rows.map((row, idx) => {
-      const [quality, format, size] = row.sub.split(' · ');
-      return (
-        <button
-          key={`${row.item.url}-${idx}`}
-          onClick={() => onDownload(row.item, row.variant)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 7,
-            background: 'none',
-            border: 'none',
-            borderBottom: idx < rows.length - 1 ? `1px solid rgba(255,255,255,0.06)` : 'none',
-            padding: '8px 12px',
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
-          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = HOVER)}
-          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'none')}>
-          {quality && (
-            <span
-              style={{
-                color: TEXT,
-                background: idx === 0 ? 'rgba(96,165,250,0.22)' : 'rgba(255,255,255,0.08)',
-                borderRadius: 4,
-                padding: '2px 5px',
-                fontSize: 10,
-                fontWeight: 700,
-                lineHeight: 1.2,
-              }}>
-              {quality}
-            </span>
-          )}
-          {format && <span style={{ color: 'rgba(255,255,255,0.72)', fontSize: 10, fontWeight: 600 }}>{format}</span>}
-          {size && (
-            <span style={{ marginLeft: 'auto', color: MUTED, fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>
-              {size}
-            </span>
-          )}
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    (panel?.querySelector<HTMLElement>('input:checked') ?? panel?.querySelector('button'))?.focus({
+      preventScroll: true,
+    });
+  }, []);
+
+  const renderOption = (option: DownloadOption, isAlternative = false, version?: number) => (
+    <label
+      key={option.key}
+      htmlFor={`${radioName}-${option.key}`}
+      aria-label={`${option.quality}, ${option.details}, ${option.size}`}
+      className={isAlternative ? 'vidsy-option vidsy-option-alternative' : 'vidsy-option'}>
+      <input
+        id={`${radioName}-${option.key}`}
+        type="radio"
+        name={radioName}
+        checked={selected?.key === option.key}
+        disabled={option.blocked}
+        onChange={() => setSelectedKey(option.key)}
+      />
+      <span className="vidsy-option-copy">
+        <span className="vidsy-option-heading">
+          <span className="vidsy-option-quality">{isAlternative ? `Version ${version}` : option.quality}</span>
+          <span className="vidsy-option-details" title={option.details}>
+            {option.details}
+            {option.blocked ? ' · Unavailable' : ''}
+          </span>
+          <span className="vidsy-option-size">{option.size}</span>
+        </span>
+      </span>
+    </label>
+  );
+
+  return (
+    <div ref={panelRef} className="vidsy-download-panel" role="dialog" aria-labelledby={titleId}>
+      <header className="vidsy-panel-header">
+        <div>
+          <h2 id={titleId}>Download video</h2>
+          <p title={primary.title ?? primary.fileName}>{primary.title ?? primary.fileName ?? 'Current video'}</p>
+          {primary.duration ? <span className="vidsy-duration">{formatSeconds(primary.duration)}</span> : null}
+        </div>
+        <button type="button" className="vidsy-close" onClick={onClose} aria-label="Close download options">
+          <IcoX />
         </button>
-      );
-    })}
-  </div>
-);
+      </header>
+      <div className="vidsy-quality-list" role="group" aria-label="Video quality">
+        {groups.map(group => {
+          const active = group.options.find(option => option.key === selected?.key);
+          const expanded = expandedQualities.includes(group.quality);
+          const representative = (expanded ? undefined : active) ?? group.options[0];
+          return (
+            <div key={group.options[0].key} className="vidsy-quality-group">
+              {renderOption(representative)}
+              {group.options.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    className="vidsy-more-versions"
+                    aria-expanded={expanded}
+                    onClick={() =>
+                      setExpandedQualities(previous =>
+                        expanded ? previous.filter(quality => quality !== group.quality) : [...previous, group.quality],
+                      )
+                    }>
+                    {expanded ? 'Hide other versions' : `${group.options.length - 1} other versions`}
+                    <span aria-hidden="true">{expanded ? '−' : '+'}</span>
+                  </button>
+                  {expanded &&
+                    group.options
+                      .filter(option => option.key !== representative.key)
+                      .map(option => renderOption(option, true, group.options.indexOf(option) + 1))}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <footer className="vidsy-panel-footer">
+        <button
+          type="button"
+          className="vidsy-download-button"
+          disabled={!selected || selected.blocked}
+          onClick={() => selected && onDownload(selected.item, selected.variant)}>
+          <IcoDown /> Download
+        </button>
+      </footer>
+    </div>
+  );
+};

@@ -254,3 +254,136 @@ test('HLS range parts validate their intervals and assemble only the requested b
     globalThis.fetch = original;
   }
 });
+
+test('stream download fails after 30 seconds without response headers', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const original = fetch;
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => {
+    started = resolve;
+  });
+  globalThis.fetch = async (_url, init) =>
+    new Promise((_resolve, reject) => {
+      init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), { once: true });
+      started();
+    });
+  try {
+    const result = run({
+      type: 'fetch-url',
+      jobId: 'idle-headers',
+      jobKey: 'idle-headers',
+      opfsName: 'idle-headers.bin',
+      url: 'https://source.test/stalled',
+      stage: 'download-audio',
+    });
+    await ready;
+    t.mock.timers.tick(30_000);
+    assert.deepEqual(await result, {
+      type: 'error',
+      jobId: 'idle-headers',
+      error: 'Download stalled: no data for 30 seconds',
+    });
+    assert.equal(files.has('idle-headers.bin'), false);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('stream idle timeout resets on received bytes and bounds a stalled response body', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const original = fetch;
+  let stream!: ReadableStreamDefaultController<Uint8Array>;
+  let onProgress!: () => void;
+  const waitForProgress = () =>
+    new Promise<void>(resolve => {
+      onProgress = resolve;
+    });
+  const observer = (message: WorkerResponse) => {
+    if (message.type === 'progress' && message.jobId === 'idle-body') onProgress();
+  };
+  observers.add(observer);
+  globalThis.fetch = async (_url, init) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          stream = controller;
+          init!.signal!.addEventListener('abort', () => controller.error(init!.signal!.reason), { once: true });
+          controller.enqueue(new Uint8Array([1]));
+        },
+      }),
+      { headers: { 'content-length': '3' } },
+    );
+  try {
+    const firstByte = waitForProgress();
+    const result = run({
+      type: 'fetch-url',
+      jobId: 'idle-body',
+      jobKey: 'idle-body',
+      opfsName: 'idle-body.bin',
+      url: 'https://source.test/stalled',
+      stage: 'download-audio',
+    });
+    await firstByte;
+    t.mock.timers.tick(29_000);
+    const nextByte = waitForProgress();
+    stream.enqueue(new Uint8Array([2]));
+    await nextByte;
+    t.mock.timers.tick(29_000);
+    assert.equal(files.has('idle-body.bin'), true);
+    t.mock.timers.tick(1_000);
+    assert.deepEqual(await result, {
+      type: 'error',
+      jobId: 'idle-body',
+      error: 'Download stalled: no data for 30 seconds',
+    });
+    assert.equal(files.has('idle-body.bin'), false);
+  } finally {
+    globalThis.fetch = original;
+    observers.delete(observer);
+  }
+});
+
+test('three HLS jobs share eight data connections and preserve each file order', async () => {
+  const original = fetch;
+  let active = 0,
+    peak = 0,
+    release!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  globalThis.fetch = async url => {
+    active++;
+    peak = Math.max(peak, active);
+    await gate;
+    active--;
+    const index = Number(new URL(String(url)).pathname.split('/').pop());
+    return new Response(new Uint8Array([index]));
+  };
+  try {
+    const jobs = ['a', 'b', 'c'].map(key =>
+      run({
+        type: 'fetch-segments',
+        jobId: `budget-${key}`,
+        jobKey: `budget-${key}`,
+        opfsName: `budget-${key}.bin`,
+        stage: 'download-video',
+        maxConnections: 8,
+        segments: Array.from({ length: 12 }, (_, i) => ({ url: `https://source.test/${key}/${i}`, sequenceNumber: i })),
+      }),
+    );
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(active, 8);
+    release();
+    const results = await Promise.all(jobs);
+    assert.equal(peak, 8);
+    assert.ok(results.every(result => result.type === 'fetch-done'));
+    for (const key of ['a', 'b', 'c'])
+      assert.deepEqual(
+        [...files.get(`budget-${key}.bin`)!],
+        Array.from({ length: 12 }, (_, i) => i),
+      );
+  } finally {
+    release();
+    globalThis.fetch = original;
+  }
+});

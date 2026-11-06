@@ -1,6 +1,6 @@
 import { buildDownloadMessage } from './download-request';
 import { buildRows } from './media-helpers';
-import { resolvePlayerMedia, selectVisiblePlayer } from './player-media';
+import { presentationThumbnailUrl, resolvePlayerMedia, selectVisiblePlayer } from './player-media';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { MediaItem } from '@extension/shared';
@@ -93,6 +93,46 @@ test('direct and child playlist sources resolve without provider-specific assump
   );
 });
 
+test('the playing source wins over alternate source tags and a stale poster', () => {
+  const playing = item('100');
+  const alternative = item('200');
+  assert.equal(
+    resolvePlayerMedia([playing, alternative], {
+      ...evidence('200'),
+      currentSrc: playing.url,
+      sourceUrls: [playing.url, alternative.url],
+    })?.item,
+    playing,
+  );
+});
+
+test('X poster fallback requires the playing URL to identify the same asset', () => {
+  const media = item('100');
+  const matchingUrl = 'https://video.twimg.com/amplify_video/100/vid/720.mp4';
+  const conflictingUrl = 'https://video.twimg.com/amplify_video/200/vid/720.mp4';
+  assert.equal(
+    resolvePlayerMedia([media], { ...evidence('100'), currentSrc: matchingUrl, sourceUrls: [matchingUrl] })?.item,
+    media,
+  );
+  assert.equal(
+    resolvePlayerMedia([media], { ...evidence('100'), currentSrc: conflictingUrl, sourceUrls: [conflictingUrl] }),
+    undefined,
+  );
+});
+
+test('blob playback ignores stale non-blob source tags', () => {
+  const playing = item('100');
+  const stale = item('200');
+  assert.equal(
+    resolvePlayerMedia([playing, stale], {
+      ...evidence('100'),
+      currentSrc: 'blob:https://x.com/local',
+      sourceUrls: ['blob:https://x.com/local', stale.url],
+    })?.item,
+    playing,
+  );
+});
+
 test('single-player pages retain a unique same-page presentation; multiple candidates remain unresolved', () => {
   const player = { sourceUrls: ['blob:local'], posterUrl: '', pageUrl, playerCount: 1 };
   assert.equal(resolvePlayerMedia([item('100')], player)?.item.id, '100');
@@ -100,6 +140,28 @@ test('single-player pages retain a unique same-page presentation; multiple candi
   assert.equal(resolvePlayerMedia([item('100'), item('200')], player), undefined);
   assert.equal(resolvePlayerMedia([item('100')], { ...player, pageUrl: 'https://example.com/other' })?.item.id, '100');
   assert.equal(resolvePlayerMedia([item('100')], { ...player, playerCount: 2 }), undefined);
+});
+
+test('a unique same-page blob player uses its page image when the video has no poster', () => {
+  const media = { ...item('100'), pageUrl: 'https://missav.ws/dm14/en/cz0006' };
+  const player = {
+    sourceUrls: ['blob:https://missav.ws/local'],
+    posterUrl: '',
+    pageUrl: media.pageUrl,
+    playerCount: 1,
+  };
+  const resolved = resolvePlayerMedia([media], player);
+  assert.equal(resolved?.authority, 'unique-presentation');
+  assert.equal(
+    presentationThumbnailUrl(resolved, player, 'https://fourhoi.com/cz0006/cover-n.jpg'),
+    'https://fourhoi.com/cz0006/cover-n.jpg',
+  );
+  assert.equal(
+    presentationThumbnailUrl(resolved, { ...player, pageUrl: 'https://other.example/watch' }, '/cover.jpg'),
+    undefined,
+  );
+  assert.equal(presentationThumbnailUrl(resolved, { ...player, playerCount: 2 }, '/cover.jpg'), undefined);
+  assert.equal(presentationThumbnailUrl(resolved, player, 'javascript:alert(1)'), undefined);
 });
 
 test('Bilibili blob player resolves its uniquely paired video and audio tracks', () => {

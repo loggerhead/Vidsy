@@ -1,7 +1,10 @@
+import { extractBilibiliPresentation } from './bilibili-presentation';
 import { MEDIA_MESSAGE } from '@extension/shared';
 import type { MediaKind, MediaVariant } from '@extension/shared';
 
 type DeclaredMediaPresentation = {
+  title?: string;
+  thumbnail?: string;
   duration?: number;
   variants: MediaVariant[];
 };
@@ -24,10 +27,13 @@ const mediaUrl = (value: JsonValue | undefined): string | undefined => {
   }
 };
 
-const durationSeconds = (value: JsonValue | undefined): number | undefined => {
-  const duration = positiveNumber(value);
-  if (!duration) return undefined;
-  return duration > 86_400 ? duration / 1000 : duration;
+const explicitDurationSeconds = (value: { [key: string]: JsonValue }): number | undefined => {
+  const seconds = positiveNumber(value.durationSeconds);
+  if (seconds !== undefined) return seconds;
+  const milliseconds = positiveNumber(value.durationMillis) ?? positiveNumber(value.durationMs);
+  // A plain "duration" has no declared unit. Its magnitude cannot tell us
+  // whether a short video is measured in milliseconds or a long one in seconds.
+  return milliseconds !== undefined ? milliseconds / 1000 : undefined;
 };
 
 const toVariant = (value: JsonValue): MediaVariant | undefined => {
@@ -68,7 +74,7 @@ const collectPresentations = (
   }
   if (!isRecord(value)) return;
 
-  const duration = durationSeconds(value.duration) ?? inheritedDuration;
+  const duration = explicitDurationSeconds(value) ?? inheritedDuration;
   Object.values(value).forEach(child => collectPresentations(child, duration, output));
 };
 
@@ -135,6 +141,48 @@ const extractDeclaredMediaPresentations = (scripts: string[]): DeclaredMediaPres
   });
 };
 
+const extractAcfunPresentation = (pageUrl: string, scripts: string[]): DeclaredMediaPresentation | undefined => {
+  let videoId: string | undefined;
+  try {
+    const url = new URL(pageUrl);
+    if (url.hostname !== 'www.acfun.cn' && url.hostname !== 'acfun.cn') return undefined;
+    videoId = /^\/v\/ac(\d+)\/?$/.exec(url.pathname)?.[1];
+  } catch {
+    return undefined;
+  }
+  if (!videoId) return undefined;
+
+  for (const script of scripts) {
+    const assignment = /window\.pageInfo\s*=\s*window\.videoInfo\s*=\s*/.exec(script);
+    if (!assignment) continue;
+    const start = script.indexOf('{', assignment.index + assignment[0].length);
+    const parsed = start >= 0 ? parseJsonAt(script, start) : undefined;
+    if (!parsed || !isRecord(parsed.value) || String(parsed.value.dougaId) !== videoId) continue;
+    const currentVideo = parsed.value.currentVideoInfo;
+    if (!isRecord(currentVideo) || typeof currentVideo.ksPlayJson !== 'string') continue;
+    try {
+      const playInfo = JSON.parse(currentVideo.ksPlayJson) as JsonValue;
+      if (!isRecord(playInfo) || !Array.isArray(playInfo.adaptationSet)) continue;
+      for (const set of playInfo.adaptationSet) {
+        if (!isRecord(set) || !Array.isArray(set.representation)) continue;
+        const variants = set.representation.map(toVariant).filter((variant): variant is MediaVariant => !!variant);
+        if (!variants.length) continue;
+        // AcFun declares both values in milliseconds, including short videos.
+        const milliseconds = positiveNumber(currentVideo.durationMillis) ?? positiveNumber(set.duration);
+        return {
+          title: typeof parsed.value.title === 'string' ? parsed.value.title : undefined,
+          thumbnail: mediaUrl(parsed.value.coverUrl),
+          duration: milliseconds ? milliseconds / 1000 : undefined,
+          variants,
+        };
+      }
+    } catch {
+      // Ignore incomplete page declarations and keep generic detection available.
+    }
+  }
+  return undefined;
+};
+
 const kindFromUrl = (url: string): MediaKind => {
   const path = new URL(url).pathname.toLowerCase();
   if (path.endsWith('.m3u8')) return 'hls';
@@ -143,6 +191,7 @@ const kindFromUrl = (url: string): MediaKind => {
 };
 
 const initDeclaredMediaPresentationDetector = (): (() => void) => {
+  const documentUrl = window.location.href;
   const sent = new Set<string>();
   let scanQueued = false;
   let disposed = false;
@@ -151,7 +200,19 @@ const initDeclaredMediaPresentationDetector = (): (() => void) => {
     if (disposed) return;
     scanQueued = false;
     const scripts = Array.from(document.scripts, script => script.textContent ?? '');
-    for (const presentation of extractDeclaredMediaPresentations(scripts)) {
+    const bilibili =
+      window.location.href === documentUrl
+        ? extractBilibiliPresentation({
+            pageUrl: documentUrl,
+            canonicalUrl: document.querySelector<HTMLMetaElement>('meta[property="og:url"]')?.content,
+            scripts,
+            title: document.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content || document.title,
+            thumbnail: document.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content,
+          })
+        : undefined;
+    const acfun = extractAcfunPresentation(documentUrl, scripts);
+    const presentations = bilibili ? [bilibili] : acfun ? [acfun] : extractDeclaredMediaPresentations(scripts);
+    for (const presentation of presentations) {
       const primary = presentation.variants[0];
       const key = presentation.variants.map(variant => variant.url).join('\n');
       if (sent.has(key)) continue;
@@ -163,9 +224,14 @@ const initDeclaredMediaPresentationDetector = (): (() => void) => {
             url: primary.url,
             kind: kindFromUrl(primary.url),
             source: 'element',
-            title: document.title,
+            title: presentation.title ?? document.title,
+            thumbnail: presentation.thumbnail,
             duration: presentation.duration,
             variants: presentation.variants,
+            resolution: primary.resolution,
+            mimeType: primary.mimeType,
+            audioUrl: primary.audioUrl,
+            audioMimeType: primary.audioMimeType,
           },
         })
         .catch(() => undefined);
@@ -196,5 +262,5 @@ const initDeclaredMediaPresentationDetector = (): (() => void) => {
   };
 };
 
-export { extractDeclaredMediaPresentations, initDeclaredMediaPresentationDetector };
+export { extractAcfunPresentation, extractDeclaredMediaPresentations, initDeclaredMediaPresentationDetector };
 export type { DeclaredMediaPresentation };

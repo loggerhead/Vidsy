@@ -1,4 +1,5 @@
 import { browserDownloadTerminal } from './browser-download-state';
+import { recordDownloadDiagnostic } from './download-diagnostics';
 import {
   runtime,
   projectSnapshot,
@@ -19,6 +20,7 @@ import {
 import { addHistoryEntry } from './history';
 import { createId, deriveKind, deriveFileName, sanitizeFileName } from './media-utils';
 import { updateProgress } from './progress';
+import { createProgressPublisher } from './progress-publisher';
 import { executorIdentity } from '../../offscreen/lib/execution-registry';
 import { scopeHeaders } from '../../offscreen/lib/hls-request';
 import { buildFilenameContext, renderFilenameTemplate } from '@extension/shared';
@@ -66,6 +68,8 @@ const inventoryRecords = async (): Promise<ExecutionRecord[]> => {
   return (await sendOffscreen({ type: 'offscreen/executions' })).records;
 };
 const forgetExecution = async (command: ExecutorCommand) => {
+  reportSequences.delete(command.executionId);
+  reportedStages.delete(command.executionId);
   await removeHeadersForDownload(command.executionId);
   await chrome.runtime
     .sendMessage({ type: 'offscreen/forget-execution', payload: { executionId: command.executionId } })
@@ -83,6 +87,8 @@ const serializeEvent = <T>(operation: () => Promise<T>): Promise<T> => {
   );
   return pending;
 };
+const reportSequences = new Map<string, number>();
+const reportedStages = new Map<string, string>();
 const processReport = async (report: ExecutionReport): Promise<void> => {
   const { command } = report;
   const identity = executorIdentity(command);
@@ -100,10 +106,24 @@ const processReport = async (report: ExecutionReport): Promise<void> => {
       job.attempt === command.attempt
     )
       return;
+    await projectSnapshot();
     if (report.type === 'output')
       await sendOffscreen({ type: 'offscreen/cleanup-blob', payload: { blobUrl: report.output.blobUrl } });
     await forgetExecution(command);
     return;
+  }
+  if (report.sequence !== undefined) {
+    if (report.sequence <= (reportSequences.get(command.executionId) ?? -1)) return;
+    // Commit only after processing: an unacknowledged storage failure retries.
+  }
+  if (report.type !== 'progress' || reportedStages.get(command.executionId) !== report.progress.stage) {
+    recordDownloadDiagnostic('execution.' + report.type, {
+      key: command.requestId,
+      executionId: command.executionId,
+      stage: report.type === 'progress' ? report.progress.stage : undefined,
+      error: report.type === 'failed' ? report.reason : undefined,
+    });
+    if (report.type === 'progress') reportedStages.set(command.executionId, report.progress.stage ?? 'init');
   }
   if (report.type === 'acknowledged') {
     await runtime.executorEvent({ ...identity, type: 'acknowledged' });
@@ -153,9 +173,20 @@ const processReport = async (report: ExecutionReport): Promise<void> => {
     }
   }
   await projectSnapshot();
+  if (report.sequence !== undefined && report.type !== 'failed' && report.type !== 'cancelled')
+    reportSequences.set(command.executionId, report.sequence);
   void runtime.schedule().catch(() => undefined);
 };
-const handleExecutionReport = (report: ExecutionReport) => serializeEvent(() => processReport(report));
+const progressPublisher = createProgressPublisher<ExecutionReport>(report =>
+  serializeEvent(() => processReport(report)),
+);
+const handleExecutionReport = (report: ExecutionReport) =>
+  progressPublisher.publish(
+    report.command.executionId,
+    report.type === 'progress' ? (report.progress.stage ?? 'init') : report.type,
+    report,
+    report.type !== 'progress',
+  );
 
 const reconcileBrowserDownload = async (downloadId: number) => {
   const [download] = await chrome.downloads.search({ id: downloadId });

@@ -173,25 +173,24 @@ export const DownloadRow = ({
               {entry.downloadId !== undefined ? (
                 <>
                   <button
-                    className={cn(
-                      'flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition',
-                      isLight
-                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                        : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25',
-                    )}
-                    onClick={() => chrome.runtime.sendMessage({ type: 'media/open', downloadId: entry.downloadId })}>
-                    <IconPlay /> Play
-                  </button>
-                  <button
-                    className={cn(
-                      'flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition',
-                      isLight
-                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        : 'bg-white/[0.06] text-gray-300 hover:bg-white/[0.1]',
-                    )}
+                    className="flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-emerald-600"
                     onClick={() => chrome.runtime.sendMessage({ type: 'media/show', downloadId: entry.downloadId })}>
                     <IconFolder /> Show in Folder
                   </button>
+                  {item ? (
+                    <button
+                      className={cn(
+                        'rounded-md p-1.5 transition',
+                        isLight
+                          ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          : 'bg-white/[0.06] text-gray-300 hover:bg-white/[0.1]',
+                      )}
+                      title="Download again"
+                      aria-label="Download again"
+                      onClick={() => onRetry(entry)}>
+                      <IconRefresh />
+                    </button>
+                  ) : null}
                 </>
               ) : (
                 <span className={cn('text-[11px] font-medium', isLight ? 'text-emerald-600' : 'text-emerald-400')}>

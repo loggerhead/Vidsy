@@ -31,3 +31,12 @@ test('describes overlay download progress without falling back to idle download 
   assert.equal(describeProgress({ stage: 'mux', downloadedBytes: 0, muxPercent: 61 }), 'Mux 61%');
   assert.equal(describeProgress({ stage: 'finalize', downloadedBytes: 0 }), 'Saving');
 });
+
+test('terminal and waiting states take precedence over a stale byte percentage', () => {
+  assert.equal(describeProgress({ stage: 'failed', downloadedBytes: 96, estimatedBytes: 100 }), 'Failed');
+  assert.equal(
+    describeProgress({ stage: 'mux', activity: 'waiting-mux', downloadedBytes: 96, estimatedBytes: 100 }),
+    'Mux queued',
+  );
+  assert.equal(describeProgress({ stage: 'mux', activity: 'verifying', downloadedBytes: 96 }), 'Checking');
+});

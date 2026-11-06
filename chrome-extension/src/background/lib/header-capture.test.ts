@@ -1,8 +1,10 @@
 import {
   capturedRequestHeaders,
+  setupHeaderCapture,
   captureHeaders,
   clearCapturedHeadersForTab,
   findCapturedHeaders,
+  findDownloadHeaders,
   headersForDnr,
   injectHeadersForDownload,
   authorizeUrlForDownload,
@@ -27,6 +29,38 @@ test('findCapturedHeaders does not reuse an exact URL captured by another tab', 
   captureHeaders('https://cdn.example/video.m3u8', 7, { Authorization: 'Bearer tab-seven' });
 
   assert.equal(findCapturedHeaders('https://cdn.example/video.m3u8', undefined, 8), undefined);
+});
+
+test('unplayed Bilibili renditions get public referrer context without borrowing captured credentials', () => {
+  capturedRequestHeaders.clear();
+  const target = 'https://upos.example.bilivideo.com/upgcxcode/video.m4s';
+  captureHeaders(target, 8, { Cookie: 'other-account', Authorization: 'Bearer other-account' });
+  captureHeaders('https://upos.example.bilivideo.com/upgcxcode/other.m4s', 7, { Cookie: 'other-rendition' });
+  assert.deepEqual(findDownloadHeaders(target, 7, 'https://www.bilibili.com/video/BV12tpi6uEGq/'), {
+    Referer: 'https://www.bilibili.com/',
+  });
+  const audio = 'https://audio.mcdn.bilivideo.cn:8082/v1/resource/audio.m4s';
+  assert.deepEqual(findDownloadHeaders(audio, 7, 'https://www.bilibili.com/video/BV12tpi6uEGq/'), {
+    Referer: 'https://www.bilibili.com/',
+  });
+  captureHeaders(target, 7, { referer: 'https://www.bilibili.com/', Accept: '*/*' });
+  assert.deepEqual(findDownloadHeaders(target, 7, 'https://www.bilibili.com/video/BV12tpi6uEGq/'), {
+    referer: 'https://www.bilibili.com/',
+    Accept: '*/*',
+  });
+});
+
+test('provider referrer fallback rejects unrelated pages, URLs and lookalike domains', () => {
+  capturedRequestHeaders.clear();
+  for (const [target, page] of [
+    ['https://bilivideo.com.evil.example/video.m4s', 'https://www.bilibili.com/video/BV12tpi6uEGq/'],
+    ['https://evilbilivideo.com/video.m4s', 'https://www.bilibili.com/video/BV12tpi6uEGq/'],
+    ['https://cdn.bilivideo.com/video.m4s', 'https://www.bilibili.com.evil.example/video/BV12tpi6uEGq/'],
+    ['https://cdn.bilivideo.com/video.m4s', 'https://other.example/watch'],
+    ['https://cdn.bilivideo.com/video.m4s', 'https://www.bilibili.com/'],
+    ['http://cdn.bilivideo.com/video.m4s', 'https://www.bilibili.com/video/BV12tpi6uEGq/'],
+  ])
+    assert.equal(findDownloadHeaders(target, 7, page), undefined);
 });
 
 test('headersForDnr excludes browser-generated fetch metadata', () => {
@@ -144,4 +178,51 @@ test('identical CDN URLs keep independent tab credentials and tab cleanup preser
   clearCapturedHeadersForTab(8);
   assert.equal(findCapturedHeaders(url, undefined, 8), undefined);
   assert.equal(findCapturedHeaders(url, undefined, 7)?.Authorization, 'Bearer A');
+});
+
+test('a failed unauthenticated probe cannot replace a successful request context', () => {
+  const original = globalThis.chrome;
+  let request!: (details: {
+      requestId: string;
+      url?: string;
+      tabId?: number;
+      requestHeaders?: Array<{ name: string; value: string }>;
+      statusCode?: number;
+    }) => void,
+    response!: (details: {
+      requestId: string;
+      url?: string;
+      tabId?: number;
+      requestHeaders?: Array<{ name: string; value: string }>;
+      statusCode?: number;
+    }) => void;
+  Object.assign(globalThis, {
+    chrome: {
+      webRequest: {
+        onSendHeaders: {
+          addListener: (listener: typeof request) => {
+            request = listener;
+          },
+        },
+        onResponseStarted: {
+          addListener: (listener: typeof response) => {
+            response = listener;
+          },
+        },
+        onErrorOccurred: { addListener: () => {} },
+      },
+    },
+  });
+  try {
+    capturedRequestHeaders.clear();
+    setupHeaderCapture();
+    const url = 'https://example.test/master.m3u8';
+    request({ requestId: 'good', url, tabId: 7, requestHeaders: [{ name: 'Authorization', value: 'Bearer good' }] });
+    response({ requestId: 'good', statusCode: 200 });
+    request({ requestId: 'bad', url, tabId: 7, requestHeaders: [{ name: 'Accept', value: '*/*' }] });
+    response({ requestId: 'bad', statusCode: 401 });
+    assert.deepEqual(findCapturedHeaders(url, undefined, 7), { Authorization: 'Bearer good' });
+  } finally {
+    Object.assign(globalThis, { chrome: original });
+  }
 });

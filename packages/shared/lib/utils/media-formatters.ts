@@ -153,8 +153,9 @@ const variantCodec = (v: MediaVariant): string | undefined => {
   return undefined;
 };
 
-const variantOptionLabel = (v: MediaVariant): string => {
-  const resolution = v.resolution ? `${v.resolution.width}×${v.resolution.height}` : undefined;
+const variantOptionLabel = (v: MediaVariant, options?: { includeResolution?: boolean }): string => {
+  const resolution =
+    options?.includeResolution === false || !v.resolution ? undefined : `${v.resolution.width}×${v.resolution.height}`;
   const frameRate = v.frameRate && v.frameRate > 30 ? `${v.frameRate}fps` : undefined;
   const bitrate =
     v.bandwidth && v.bandwidth > 0

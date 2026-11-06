@@ -121,10 +121,24 @@ const probeMp4 = async (file: Blob): Promise<ProbeResult> => {
 
   let offset = 0;
   let moovBytes: Uint8Array | undefined;
+  let trackTimescales = new Map<number, number>();
+  let headerWindow: Uint8Array = new Uint8Array();
+  let windowStart = -1;
   let sawMediaData = false;
   let fragmentSeconds = 0;
   while (offset < file.size) {
-    const boxHeader = await readBytes(file, offset, Math.min(16, file.size - offset));
+    if (
+      windowStart < 0 ||
+      offset < windowStart ||
+      offset + Math.min(16, file.size - offset) > windowStart + headerWindow.length
+    ) {
+      windowStart = offset;
+      headerWindow = await readBytes(file, offset, Math.min(64 * 1024, file.size - offset));
+    }
+    const boxHeader = headerWindow.subarray(
+      offset - windowStart,
+      offset - windowStart + Math.min(16, file.size - offset),
+    );
     if (boxHeader.byteLength < 8) throw new Error('Output MP4 ends with a truncated box header');
     let size = u32(boxHeader, 0);
     const type = ascii(boxHeader, 4, 4);
@@ -137,9 +151,15 @@ const probeMp4 = async (file: Blob): Promise<ProbeResult> => {
     if (!Number.isSafeInteger(size) || size < 8 || offset + size > file.size) {
       throw new Error(`Output MP4 has an invalid ${type || 'unknown'} box`);
     }
-    if (type === 'moov') moovBytes = await readBytes(file, offset, size);
+    if (type === 'moov') {
+      moovBytes = await readBytes(file, offset, size);
+      trackTimescales = movieTrackTimescales(moovBytes);
+    }
     if (type === 'moof' && moovBytes)
-      fragmentSeconds = Math.max(fragmentSeconds, fragmentedDuration(await readBytes(file, offset, size), moovBytes));
+      fragmentSeconds = Math.max(
+        fragmentSeconds,
+        fragmentedDuration(await readBytes(file, offset, size), trackTimescales),
+      );
     if (type === 'mdat') sawMediaData = true;
     offset += size;
   }
@@ -157,7 +177,7 @@ const probeMp4 = async (file: Blob): Promise<ProbeResult> => {
 
 // Fragmented MP4 init segments normally have a zero mvhd duration. Verify the
 // actual decode timeline instead of rejecting correctly concatenated fragments.
-const fragmentedDuration = (bytes: Uint8Array, movie: Uint8Array): number => {
+const movieTrackTimescales = (movie: Uint8Array): Map<number, number> => {
   const moov = mp4Boxes(movie).find(box => box.type === 'moov')!;
   const tracks = new Map<number, number>();
   for (const track of mp4Boxes(movie, moov.headerSize, moov.size).filter(box => box.type === 'trak')) {
@@ -169,6 +189,10 @@ const fragmentedDuration = (bytes: Uint8Array, movie: Uint8Array): number => {
     const media = mdhd.start + mdhd.headerSize;
     tracks.set(u32(movie, id + (movie[id] === 1 ? 20 : 12)), u32(movie, media + (movie[media] === 1 ? 20 : 12)));
   }
+  return tracks;
+};
+
+const fragmentedDuration = (bytes: Uint8Array, tracks: Map<number, number>): number => {
   const moof = mp4Boxes(bytes).find(box => box.type === 'moof');
   if (!moof) return 0;
   let seconds = 0;

@@ -22,6 +22,7 @@ export type FetchSegmentsRequest = {
   segments: SegmentSpec[];
   initUrl?: string;
   initRange?: { start: number; end: number };
+  maxConnections?: number;
   keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
 };
@@ -96,7 +97,7 @@ export type MuxRequest = {
 export type PingRequest = { type: 'ping' };
 
 export type WorkerRequest =
-  | { type: 'url-authorized'; authorizationId: string; downloadKey?: string; error?: string }
+  | { type: 'url-authorized'; authorizationId: string; downloadKey?: string; url?: string; error?: string }
   | FetchSegmentsRequest
   | FetchUrlRequest
   | FetchRangesRequest
@@ -116,6 +117,9 @@ export type ProgressUpdate = {
   estimatedBytes?: number;
   muxPercent?: number;
   chunks?: ChunkProgress[];
+  activity?: 'waiting-network' | 'receiving' | 'retrying' | 'waiting-mux' | 'verifying';
+  completedParts?: number;
+  totalParts?: number;
 };
 
 export type FetchDone = {
@@ -152,6 +156,7 @@ export type WorkerError = {
 export type Pong = { type: 'pong' };
 
 export type WorkerResponse =
+  | { type: 'diagnostic'; event: string; data: unknown }
   | ProgressUpdate
   | FetchDone
   | MuxDone

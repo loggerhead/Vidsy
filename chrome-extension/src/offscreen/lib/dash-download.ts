@@ -1,10 +1,4 @@
-import {
-  dashManifestDurationSeconds,
-  jsfetchInputForOpfs,
-  jsfetchInputForUrl,
-  needsAuthFallback,
-  preflightDiskSpace,
-} from './libav-mux';
+import { dashManifestDurationSeconds, jsfetchInputForOpfs, jsfetchInputForUrl, preflightDiskSpace } from './libav-mux';
 import { describeDash, describeDirectFile, mergeTrackDescriptors } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
@@ -236,7 +230,7 @@ export const downloadDashMuxed = async (
     let plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
     let outputContainer = plan.output.container;
     outputOpfsName = opfsNameFor(key, 'out', outputContainer);
-    const useAuthFallback = needsAuthFallback(headers);
+    const useAuthFallback = true; // All representations share the global download budget.
 
     abortController.signal.throwIfAborted();
     if (!useAuthFallback) {
@@ -337,6 +331,7 @@ export const downloadDashMuxed = async (
 
     const outputFile = await getOpfsFile(outputOpfsName);
     const delivery = await prepareOutputDelivery({
+      jobKey: key,
       file: outputFile,
       opfsName: outputOpfsName,
       plan,
