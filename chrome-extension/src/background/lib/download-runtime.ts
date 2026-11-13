@@ -1,4 +1,7 @@
 /* eslint-disable import-x/exports-last */
+import { nextAutomaticRecovery } from './download-recovery';
+import type { AutomaticRecovery } from './download-recovery';
+import type { SegmentedSource } from '../../offscreen/lib/segmented-resume';
 import type { MediaItem, MediaKind } from '@extension/shared';
 
 /**
@@ -10,7 +13,7 @@ import type { MediaItem, MediaKind } from '@extension/shared';
  * store is the authority, while all indexes in this module are disposable.
  */
 
-export const DOWNLOAD_RUNTIME_SCHEMA_VERSION = 1 as const;
+export const DOWNLOAD_RUNTIME_SCHEMA_VERSION = 2 as const;
 
 export type DownloadState =
   | 'queued'
@@ -26,6 +29,9 @@ export type DownloadPhase = 'idle' | 'fetching' | 'processing' | 'delivering';
 
 export type DownloadExecutionSpec = {
   url: string;
+  allowMetered?: boolean;
+  revalidateCompleted?: boolean;
+  reuseSegmentedSnapshot?: boolean;
   kind: MediaKind;
   outputFormat: 'mp4' | 'mp3';
   fileName?: string;
@@ -72,16 +78,20 @@ export type DownloadJob = {
   executionId?: string;
   progress: {
     downloadedBytes: number;
+    fetchBytes?: number;
     estimatedBytes?: number;
     percent?: number;
   };
-  terminal?: { reason?: string; downloadId?: number };
+  terminal?: { reason?: string; downloadId?: number; kind?: 'transport' | 'processing' | 'integrity' };
   downloadId?: number;
   artifactReady?: boolean;
   pauseRequested?: boolean;
   cancelRequested?: boolean;
   createdAt: number;
   updatedAt: number;
+  cacheExpiresAt?: number;
+  recovery?: AutomaticRecovery;
+  segmentedSource?: SegmentedSource;
   diagnostics: DownloadDiagnostic[];
 };
 
@@ -137,7 +147,7 @@ export type ExecutorEvent = ExecutionIdentity &
     | { type: 'progress'; downloadedBytes: number; estimatedBytes?: number; percent?: number; phase?: DownloadPhase }
     | { type: 'artifact'; downloadId: number }
     | { type: 'cancelled' }
-    | { type: 'failed'; reason: string }
+    | { type: 'failed'; reason: string; recoverable?: boolean; failureKind?: 'transport' | 'processing' | 'integrity' }
   );
 
 export type BrowserDeliveryEvent = {
@@ -148,10 +158,16 @@ export type BrowserDeliveryEvent = {
 };
 
 export type DownloadCommand =
-  | { type: 'cancel' }
-  | { type: 'pause' }
-  | { type: 'resume' }
-  | { type: 'retry' }
+  | { type: 'source-renewed'; executionId: string; execution: DownloadExecutionSpec; tabId?: number }
+  | { type: 'input-restarted'; reason: string; retainedBytes: number }
+  | { type: 'segmented-source'; source: SegmentedSource; restartReason?: string }
+  | { type: 'cache-lease'; expiresAt: number }
+  | { type: 'cache-invalidated'; reason: string }
+  | { type: 'cancel'; reason?: string }
+  | { type: 'pause'; automatic?: boolean; metered?: boolean; reason?: string }
+  | { type: 'recovery-check'; online: boolean; immediate?: boolean }
+  | { type: 'resume'; revalidateCompleted?: boolean }
+  | { type: 'retry'; revalidateCompleted?: boolean }
   | { type: 'clear-terminal' }
   | { type: 'reorder'; direction: 'up' | 'down' };
 
@@ -176,7 +192,10 @@ type RuntimeOptions = {
   executor?: ExecutorAdapter;
   now?: () => number;
   createExecutionId?: (job: DownloadJob) => string;
-  canStart?: (job: DownloadJob, active: DownloadJob[]) => boolean;
+  canStart?: (job: DownloadJob, active: DownloadJob[]) => boolean | Promise<boolean>;
+  recoverCheckpoint?: (
+    job: DownloadJob,
+  ) => Promise<{ downloadedBytes: number; estimatedBytes?: number; artifactAvailable?: boolean } | undefined>;
 };
 
 const terminalStates = new Set<DownloadState>(['succeeded', 'failed', 'cancelled', 'paused']);
@@ -278,7 +297,7 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
       .sort((a, b) => a.queueOrder - b.queueOrder);
     for (const job of eligible) {
       if (active.length >= capacity) break;
-      if (options.canStart && !options.canStart(job, active)) continue;
+      if (options.canStart && !(await options.canStart(job, active))) continue;
       const resumeDelivery = Boolean(job.artifactReady && job.executionId);
       if (!resumeDelivery) {
         job.attempt += 1;
@@ -357,13 +376,118 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
       const result = await transact(async state => {
         const job = state.jobs[jobId];
         if (!job) return false;
+        if (command.type === 'input-restarted') {
+          if (!['starting', 'running'].includes(job.state) || job.pauseRequested || job.cancelRequested) return false;
+          job.progress = {
+            downloadedBytes: command.retainedBytes,
+            fetchBytes: command.retainedBytes,
+            estimatedBytes: job.progress.estimatedBytes,
+          };
+          job.cacheExpiresAt = undefined;
+          addDiagnostic(job, 'input-restarted', job.state, command.reason);
+          job.updatedAt = Math.max(now(), job.updatedAt + 1);
+          return true;
+        }
+        if (command.type === 'segmented-source') {
+          if (!['starting', 'running'].includes(job.state) || job.cancelRequested || job.pauseRequested) return false;
+          job.segmentedSource = structuredClone(command.source);
+          if (command.restartReason) {
+            job.progress = { downloadedBytes: 0 };
+            job.cacheExpiresAt = undefined;
+            addDiagnostic(job, 'source-restarted', job.state, command.restartReason);
+          }
+          job.updatedAt = Math.max(now(), job.updatedAt + 1);
+          return true;
+        }
+        if (command.type === 'recovery-check') {
+          if (job.state !== 'paused' || !job.recovery || (!command.immediate && now() < job.recovery.nextRetryAt))
+            return false;
+          if (job.recovery.exhausted) {
+            job.recovery = undefined;
+            job.terminal = { reason: 'Automatic recovery exhausted; cached progress is retained. Retry to continue.' };
+            setState(job, 'failed', 'auto-recovery-exhausted');
+            return true;
+          }
+          const attempts = job.recovery.attempts + 1;
+          if (!command.online) {
+            job.recovery = nextAutomaticRecovery(attempts, now(), job.recovery.reason);
+            if (!job.recovery) {
+              job.terminal = {
+                reason: 'Automatic recovery exhausted while offline; cached progress is retained. Retry to continue.',
+              };
+              setState(job, 'failed', 'auto-recovery-exhausted');
+            } else setState(job, 'paused', 'auto-recovery-offline');
+            return true;
+          }
+          job.recovery.attempts = attempts;
+          job.executionId = undefined;
+          job.downloadId = undefined;
+          job.pauseRequested = false;
+          job.cancelRequested = false;
+          job.queueOrder = state.nextQueueOrder++;
+          setState(job, 'queued', 'auto-recovery-resume');
+          return true;
+        }
+        if (command.type === 'source-renewed') {
+          if (
+            job.executionId !== command.executionId ||
+            job.state !== 'running' ||
+            job.pauseRequested ||
+            job.cancelRequested
+          )
+            return false;
+          job.execution = structuredClone(command.execution);
+          if (command.tabId !== undefined) job.display.tabId = command.tabId;
+          addDiagnostic(
+            job,
+            'source-renewed',
+            job.state,
+            'Expired source reparsed once; cached bytes require validation',
+          );
+          job.updatedAt = Math.max(now(), job.updatedAt + 1);
+          return true;
+        }
+        if (command.type === 'cache-lease') {
+          if (['succeeded', 'cancelled'].includes(job.state)) return false;
+          job.cacheExpiresAt = command.expiresAt;
+          return true;
+        }
+        if (command.type === 'cache-invalidated') {
+          job.artifactReady = false;
+          job.cacheExpiresAt = undefined;
+          job.execution.reuseSegmentedSnapshot = false;
+          job.terminal = { ...job.terminal, kind: undefined, reason: command.reason };
+          if (job.segmentedSource?.live && job.state === 'paused')
+            setState(job, 'failed', 'live-cache-invalidated', command.reason);
+          addDiagnostic(job, 'cache-invalidated', job.state, command.reason);
+          job.updatedAt = Math.max(now(), job.updatedAt + 1);
+          return true;
+        }
         if (command.type === 'clear-terminal') {
           if (!terminalStates.has(job.state) || job.state === 'paused') return false;
+          if (job.state === 'failed' && job.executionId)
+            stop = {
+              jobId: job.jobId,
+              requestId: job.requestId,
+              attempt: job.attempt,
+              executionId: job.executionId,
+              intent: 'cancel',
+            };
           delete state.jobs[jobId];
           return true;
         }
-        if (command.type === 'cancel') {
-          if (terminalStates.has(job.state) && job.state !== 'paused') return job.state === 'cancelled';
+        if (
+          command.type === 'cancel' ||
+          (command.type === 'pause' &&
+            job.segmentedSource?.live &&
+            !job.execution.reuseSegmentedSnapshot &&
+            !job.artifactReady)
+        ) {
+          job.recovery = undefined;
+          job.cacheExpiresAt = undefined;
+          if (command.reason) job.terminal = { reason: command.reason };
+          if (terminalStates.has(job.state) && job.state !== 'paused' && job.state !== 'failed')
+            return job.state === 'cancelled';
           job.pauseRequested = false;
           job.cancelRequested = true;
           if (job.executionId)
@@ -372,14 +496,37 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
               requestId: job.requestId,
               attempt: job.attempt,
               executionId: job.executionId,
-              intent: command.type,
+              intent: 'cancel',
             };
           // Keep the slot until the executor confirms it has stopped.
-          if (job.state === 'queued' || job.state === 'paused') setState(job, 'cancelled', 'cancel');
-          else addDiagnostic(job, 'cancel-requested');
+          if (job.state === 'queued' || job.state === 'paused' || job.state === 'failed') {
+            job.progress = { downloadedBytes: 0 };
+            setState(job, 'cancelled', 'cancel');
+          } else addDiagnostic(job, 'cancel-requested');
           return true;
         }
         if (command.type === 'pause') {
+          if (command.metered) job.execution.allowMetered = false;
+          if (command.reason) job.terminal = { reason: command.reason };
+          if (job.state === 'queued') {
+            job.recovery = undefined;
+            job.pauseRequested = false;
+            setState(job, 'paused', 'queue-paused', command.reason);
+            return true;
+          }
+          if (command.automatic) {
+            if (job.segmentedSource?.live) return false;
+            if (job.state !== 'running' && job.state !== 'starting') return false;
+            job.recovery = nextAutomaticRecovery(job.recovery?.attempts ?? 0, now(), 'Network disconnected');
+            job.terminal = { reason: 'Network disconnected; cached progress is retained. Waiting to reconnect.' };
+            if (!job.recovery) {
+              job.recovery = { attempts: 5, nextRetryAt: now(), reason: 'Network disconnected', exhausted: true };
+              job.terminal.reason = 'Automatic recovery exhausted; cached progress is retained. Retry to continue.';
+            }
+          } else {
+            job.recovery = undefined;
+            if (job.state === 'paused') setState(job, 'paused', 'manual-pause');
+          }
           if (!activeStates.has(job.state)) return job.state === 'paused';
           job.pauseRequested = true;
           job.cancelRequested = false;
@@ -397,9 +544,17 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
         if (command.type === 'resume' || command.type === 'retry') {
           const allowed = command.type === 'resume' ? job.state === 'paused' : job.state === 'failed';
           if (!allowed) return false;
+          job.execution.allowMetered = true;
+          job.execution.reuseSegmentedSnapshot =
+            (job.terminal?.kind === 'processing' ||
+              (job.state === 'paused' && job.execution.reuseSegmentedSnapshot === true)) &&
+            Boolean(job.segmentedSource?.snapshot) &&
+            !command.revalidateCompleted;
+          job.recovery = undefined;
           job.pauseRequested = false;
           job.cancelRequested = false;
-          if (command.type === 'resume' && job.artifactReady) {
+          job.execution.revalidateCompleted = command.revalidateCompleted ?? false;
+          if (job.artifactReady && !command.revalidateCompleted) {
             job.downloadId = undefined;
             job.queueOrder = state.nextQueueOrder++;
             setState(job, 'queued', 'resume-delivery');
@@ -447,10 +602,39 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
         // until a successful inventory query proves they are absent.
         const present = currentInventory && new Map(currentInventory.executions.map(item => [item.executionId, item]));
         for (const job of Object.values(state.jobs)) {
+          if (present && !['succeeded', 'cancelled'].includes(job.state) && !present.has(job.executionId ?? '')) {
+            if (
+              job.segmentedSource?.live &&
+              !job.execution.reuseSegmentedSnapshot &&
+              !job.artifactReady &&
+              ['starting', 'running', 'paused'].includes(job.state)
+            ) {
+              job.recovery = undefined;
+              job.terminal = {
+                reason:
+                  'Live playlist snapshot was interrupted; restart downloads the current playlist. Live streams cannot resume.',
+              };
+              setState(job, 'failed', 'live-snapshot-interrupted');
+              continue;
+            }
+            const checkpoint = await options.recoverCheckpoint?.(job);
+            if (checkpoint) {
+              if (checkpoint.artifactAvailable !== undefined) job.artifactReady = checkpoint.artifactAvailable;
+              job.progress.downloadedBytes = Math.max(job.progress.downloadedBytes, checkpoint.downloadedBytes);
+              job.progress.fetchBytes = Math.max(job.progress.fetchBytes ?? 0, checkpoint.downloadedBytes);
+              job.progress.estimatedBytes ??= checkpoint.estimatedBytes;
+              if (activeStates.has(job.state) && checkpoint.downloadedBytes > 0 && !job.cancelRequested)
+                job.pauseRequested = true;
+            }
+          }
           if (!present || !activeStates.has(job.state) || !job.executionId) continue;
           const execution = present.get(job.executionId);
           if (execution) {
             if (execution.acknowledged && job.state === 'starting') setState(job, 'running', 'bootstrap-reattach');
+          } else if (job.state === 'finalizing' && job.downloadId === undefined && job.artifactReady) {
+            job.pauseRequested = false;
+            job.terminal = { reason: 'Saved output retained after restart. Continue to deliver it again.' };
+            setState(job, 'paused', 'artifact-retained');
           } else if (job.state === 'finalizing' && job.downloadId === undefined) {
             job.terminal = { reason: 'Output artifact unavailable after executor restart' };
             setState(job, 'failed', 'artifact-unavailable');
@@ -479,7 +663,14 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
         } else if (event.type === 'progress') {
           if (job.state !== 'running') return false;
           job.progress = {
-            downloadedBytes: event.downloadedBytes,
+            downloadedBytes:
+              event.phase === 'fetching'
+                ? Math.max(event.downloadedBytes, job.progress.fetchBytes ?? 0)
+                : Math.max(event.downloadedBytes, job.progress.fetchBytes ?? 0),
+            fetchBytes:
+              event.phase === 'fetching'
+                ? Math.max(event.downloadedBytes, job.progress.fetchBytes ?? 0)
+                : job.progress.fetchBytes,
             estimatedBytes: event.estimatedBytes,
             percent: event.percent,
           };
@@ -499,14 +690,41 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
           setState(job, 'finalizing', 'artifact');
         } else if (event.type === 'cancelled') {
           if (!activeStates.has(job.state)) return false;
-          const next = job.pauseRequested ? 'paused' : 'cancelled';
+          const next = job.pauseRequested ? (job.recovery?.exhausted ? 'failed' : 'paused') : 'cancelled';
           job.pauseRequested = false;
+          if (job.recovery?.exhausted) job.recovery = undefined;
           if (next === 'cancelled') job.progress = { downloadedBytes: 0 };
           setState(job, next, 'executor-cancelled');
         } else if (event.type === 'failed') {
           if (!activeStates.has(job.state)) return false;
-          job.terminal = { reason: event.reason };
-          setState(job, 'failed', 'executor-failed', event.reason);
+          if (job.phase === 'delivering' && (event.failureKind === 'integrity' || event.failureKind === 'processing'))
+            job.artifactReady = false;
+          if (job.progress.fetchBytes !== undefined)
+            job.progress.downloadedBytes = Math.max(job.progress.downloadedBytes, job.progress.fetchBytes);
+          job.terminal = { reason: event.reason, kind: event.failureKind };
+          if (job.cancelRequested) {
+            job.recovery = undefined;
+            job.progress = { downloadedBytes: 0 };
+            setState(job, 'cancelled', 'executor-failed-after-cancel');
+          } else if (job.pauseRequested) {
+            job.pauseRequested = false;
+            const exhausted = job.recovery?.exhausted;
+            if (exhausted) {
+              job.recovery = undefined;
+              job.terminal.reason = 'Automatic recovery exhausted; cached progress is retained. Retry to continue.';
+            }
+            setState(job, exhausted ? 'failed' : 'paused', 'executor-failed-after-pause', job.terminal.reason);
+          } else if (event.recoverable && !job.segmentedSource?.live) {
+            job.recovery = nextAutomaticRecovery(job.recovery?.attempts ?? 0, now(), event.reason);
+            if (job.recovery) setState(job, 'paused', 'auto-recovery-wait', event.reason);
+            else {
+              job.terminal.reason = `Automatic recovery exhausted; cached progress is retained. Retry to continue. ${event.reason}`;
+              setState(job, 'failed', 'auto-recovery-exhausted', job.terminal.reason);
+            }
+          } else {
+            job.recovery = undefined;
+            setState(job, 'failed', 'executor-failed', event.reason);
+          }
         }
         return true;
       }),
@@ -516,6 +734,7 @@ export const createDownloadRuntime = (options: RuntimeOptions): DownloadRuntime 
         const job = state.jobs[event.jobId];
         if (!job || job.state !== 'finalizing' || job.downloadId !== event.downloadId) return false;
         if (event.state === 'complete') {
+          job.recovery = undefined;
           job.terminal = { downloadId: event.downloadId };
           setState(job, 'succeeded', 'browser-delivery-complete');
         } else {

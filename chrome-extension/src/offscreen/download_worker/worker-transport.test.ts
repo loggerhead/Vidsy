@@ -1,8 +1,17 @@
+import { createDownloadCache } from '../../background/lib/download-cache';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import test from 'node:test';
 import type { WorkerRequest, WorkerResponse } from './messages';
 
 const files = new Map<string, Uint8Array>();
+let ledger: unknown;
+const cache = createDownloadCache({
+  read: async () => ledger,
+  write: async value => {
+    ledger = value;
+  },
+});
 const root = {
   getFileHandle: async (name: string) => {
     if (!files.has(name)) files.set(name, new Uint8Array());
@@ -49,6 +58,12 @@ Object.assign(globalThis, {
       receive = listener;
     },
     postMessage: (message: WorkerResponse) => {
+      if (message.type === 'cache-request') {
+        void cache
+          .command(message.command)
+          .then(response => receive({ data: { type: 'cache-response', cacheId: message.cacheId, response } }));
+        return;
+      }
       for (const observer of observers) observer(message);
     },
   },
@@ -79,6 +94,207 @@ const rangeRequest = (jobId: string, name: string) => ({
   stage: 'download-video' as const,
   resourceVersion: '"v1"',
   maxConnections: 2,
+});
+
+test('local HTTP persistent 403 at 50% retains the first range and Retry fetches only the missing range', async () => {
+  let fail = true;
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    const range = request.headers.range!;
+    requests.push(range);
+    if (range === 'bytes=4-7' && fail) {
+      response.writeHead(403);
+      response.end();
+      return;
+    }
+    const offset = range === 'bytes=0-3' ? 0 : 4;
+    response.writeHead(206, {
+      'content-range': `bytes ${offset}-${offset + 3}/8`,
+      etag: '"v1"',
+      'content-length': '4',
+    });
+    response.end(Buffer.from([offset + 1, offset + 2, offset + 3, offset + 4]));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const request = {
+    ...rangeRequest('persistent-403', 'failed-range.bin'),
+    maxConnections: 1,
+    url: `http://127.0.0.1:${address.port}/video`,
+  };
+  try {
+    const failed = await run(request);
+    assert.ok(failed.type === 'error');
+    assert.equal(failed.failureKind, 'transport');
+    assert.match(failed.error, /403/);
+    assert.deepEqual([...files.get(request.opfsName)!], [1, 2, 3, 4]);
+    requests.length = 0;
+    fail = false;
+    assert.equal((await run({ ...request, jobId: 'retry-403' })).type, 'fetch-done');
+    assert.deepEqual(requests, ['bytes=4-7']);
+    assert.deepEqual([...files.get(request.opfsName)!], [1, 2, 3, 4, 5, 6, 7, 8]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('segments retain atomic completed parts across failure and reuse the complete input without media requests', async () => {
+  const original = fetch;
+  let fail = true;
+  const calls: string[] = [];
+  globalThis.fetch = async url => {
+    const path = new URL(String(url)).pathname;
+    calls.push(path);
+    if (path === '/1' && fail) return new Response(null, { status: 403 });
+    return new Response(new Uint8Array([path === '/0' ? 1 : 2]), { headers: { 'content-length': '1' } });
+  };
+  const request = {
+    type: 'fetch-segments' as const,
+    jobId: 'partial-segments',
+    jobKey: 'partial-segments',
+    opfsName: 'partial.ts',
+    stage: 'download-video' as const,
+    maxConnections: 1,
+    manifestIdentity: '#EXTM3U\n#EXT-X-ENDLIST',
+    segments: [0, 1].map(i => ({ url: `https://source.test/${i}`, sequenceNumber: i })),
+  };
+  try {
+    assert.equal((await run(request)).type, 'error');
+    assert.deepEqual([...files.get('partial.ts.part-0')!], [1]);
+    assert.equal(files.has('partial.ts.part-1'), false, 'an incomplete part has no durable completion marker');
+    fail = false;
+    calls.length = 0;
+    assert.equal((await run({ ...request, jobId: 'segments-retry' })).type, 'fetch-done');
+    assert.ok(calls.length > 0 && calls.every(path => path === '/1'));
+    assert.deepEqual([...files.get('partial.ts')!], [1, 2]);
+    calls.length = 0;
+    assert.equal((await run({ ...request, jobId: 'mux-input-retry' })).type, 'fetch-done');
+    assert.deepEqual(calls, []);
+    const changed = await run({ ...request, jobId: 'changed-manifest', manifestIdentity: '#EXTM3U\nchanged' });
+    assert.ok(changed.type === 'error' && changed.failureKind === 'integrity');
+    assert.equal(files.has('partial.ts'), false);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('segment pause cleanup retains its acknowledged internal checkpoint and Retry appends from 1 MiB', async () => {
+  const original = fetch;
+  const payload = new Uint8Array(3 * 1024 * 1024).fill(37);
+  const starts: number[] = [];
+  let paused = false;
+  globalThis.fetch = async (_url, init) => {
+    const [start, end] = new Headers(init?.headers).get('range')!.slice(6).split('-').map(Number);
+    starts.push(start);
+    let cursor = start;
+    const body = new ReadableStream<Uint8Array>({
+      pull(stream) {
+        if (init?.signal?.aborted) {
+          stream.error(init.signal.reason);
+          return;
+        }
+        const next = Math.min(cursor + 64 * 1024, end + 1);
+        stream.enqueue(payload.slice(cursor, next));
+        cursor = next;
+        if (!paused && end - start > 1024 * 1024 && cursor >= 1.5 * 1024 * 1024) {
+          paused = true;
+          receive({ data: { type: 'cancel', jobKey: 'segment-paused' } });
+        }
+        if (cursor > end) stream.close();
+      },
+    });
+    return new Response(body, {
+      status: 206,
+      headers: {
+        etag: '"segment-v1"',
+        'content-range': `bytes ${start}-${end}/${payload.length}`,
+        'content-length': String(end - start + 1),
+      },
+    });
+  };
+  const request = {
+    type: 'fetch-segments' as const,
+    jobId: 'segment-paused',
+    jobKey: 'segment-paused',
+    opfsName: 'paused-segment.bin',
+    stage: 'download-video' as const,
+    segments: [{ url: 'https://source.test/large', sequenceNumber: 0 }],
+  };
+  try {
+    assert.equal((await run(request)).type, 'error');
+    const record = (await cache.command({ operation: 'read', name: 'paused-segment.bin.part-0' })).record!;
+    assert.equal(record.ranges!.checkpoints![0].downloaded, 1024 * 1024);
+    assert.ok(files.has(record.name));
+    starts.length = 0;
+    assert.equal((await run({ ...request, jobId: 'segment-retry' })).type, 'fetch-done');
+    assert.deepEqual(starts, [0, 1024 * 1024]);
+    assert.deepEqual(files.get(request.opfsName), payload);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('AES-128 checkpoints ciphertext across a reset and publishes only complete decrypted plaintext', async () => {
+  const original = fetch;
+  const keyBytes = new Uint8Array(16).fill(11),
+    iv = new Uint8Array(16).fill(7);
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-CBC', false, ['encrypt']);
+  const plaintext = new Uint8Array(2 * 1024 * 1024 + 17).fill(43);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, key, plaintext));
+  const starts: number[] = [];
+  let reset = true;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/key')) return new Response(keyBytes);
+    const [start, end] = new Headers(init?.headers).get('range')!.slice(6).split('-').map(Number);
+    starts.push(start);
+    let cursor = start;
+    const body = new ReadableStream<Uint8Array>({
+      pull(stream) {
+        const next = Math.min(cursor + 64 * 1024, end + 1);
+        if (reset && end - start > 1024 * 1024 && cursor >= 1.5 * 1024 * 1024) {
+          reset = false;
+          stream.error(new TypeError('Connection reset'));
+          return;
+        }
+        stream.enqueue(ciphertext.slice(cursor, next));
+        cursor = next;
+        if (cursor > end) stream.close();
+      },
+    });
+    return new Response(body, {
+      status: 206,
+      headers: {
+        etag: '"ciphertext-v1"',
+        'content-range': `bytes ${start}-${end}/${ciphertext.length}`,
+        'content-length': String(end - start + 1),
+      },
+    });
+  };
+  try {
+    const result = await run({
+      type: 'fetch-segments',
+      jobId: 'encrypted-checkpoint',
+      jobKey: 'encrypted-checkpoint',
+      opfsName: 'encrypted.bin',
+      stage: 'download-video',
+      segments: [
+        {
+          url: 'https://source.test/ciphertext',
+          sequenceNumber: 0,
+          keyInfo: { method: 'AES-128', uri: 'https://source.test/key', iv },
+        },
+      ],
+    });
+    assert.equal(result.type, 'fetch-done');
+    assert.deepEqual(starts, [0, 0, 1024 * 1024]);
+    assert.deepEqual(files.get('encrypted.bin'), plaintext);
+    assert.equal(files.has('encrypted.bin.part-0.wire'), false);
+    assert.equal((await cache.command({ operation: 'read', name: 'encrypted.bin.part-0.wire' })).record, undefined);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test('worker rejects an ignored Range before writing any bytes and aborts siblings', async () => {
@@ -182,7 +398,7 @@ test('HLS dispatch applies backpressure and assembles staged parts in source ord
     });
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.deepEqual(
-      calls.sort((a, b) => a - b),
+      [...new Set(calls)].sort((a, b) => a - b),
       [0, 1, 2, 3, 4, 5, 6, 7],
     );
     release();
@@ -248,7 +464,10 @@ test('HLS range parts validate their intervals and assemble only the requested b
       ).type,
       'fetch-done',
     );
-    assert.deepEqual(calls, ['bytes=0-1', 'bytes=2-4', 'bytes=5-7']);
+    assert.deepEqual(
+      calls.filter(range => !/^bytes=(0-0|2-2|5-5)$/.test(range)),
+      ['bytes=0-1', 'bytes=2-4', 'bytes=5-7'],
+    );
     assert.deepEqual([...files.get('hls-ranges.mp4')!], [1, 2, 3, 4, 5, 6, 7, 8]);
   } finally {
     globalThis.fetch = original;
@@ -281,9 +500,12 @@ test('stream download fails after 30 seconds without response headers', async t 
     assert.deepEqual(await result, {
       type: 'error',
       jobId: 'idle-headers',
-      error: 'Download stalled: no data for 30 seconds',
+      error:
+        'Stream restart required: this source has no byte-offset checkpoint. Retry will download again. Download stalled: no data for 30 seconds',
+      failureKind: 'transport',
+      retryable: true,
     });
-    assert.equal(files.has('idle-headers.bin'), false);
+    assert.equal(files.has('idle-headers.bin'), true);
   } finally {
     globalThis.fetch = original;
   }
@@ -334,9 +556,12 @@ test('stream idle timeout resets on received bytes and bounds a stalled response
     assert.deepEqual(await result, {
       type: 'error',
       jobId: 'idle-body',
-      error: 'Download stalled: no data for 30 seconds',
+      error:
+        'Stream restart required: this source has no byte-offset checkpoint. Retry will download again. Download stalled: no data for 30 seconds',
+      failureKind: 'transport',
+      retryable: true,
     });
-    assert.equal(files.has('idle-body.bin'), false);
+    assert.equal(files.has('idle-body.bin'), true);
   } finally {
     globalThis.fetch = original;
     observers.delete(observer);

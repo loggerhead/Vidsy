@@ -1,8 +1,12 @@
 import { browserDownloadTerminal } from './browser-download-state';
+import { downloadCache } from './download-cache-store';
 import { recordDownloadDiagnostic } from './download-diagnostics';
 import {
   runtime,
   projectSnapshot,
+  pauseAllDownloads,
+  pauseMeteredDownloads,
+  resumeAllDownloads,
   enqueueDownload,
   resubmitDownload,
   commandDownload,
@@ -125,6 +129,30 @@ const processReport = async (report: ExecutionReport): Promise<void> => {
     });
     if (report.type === 'progress') reportedStages.set(command.executionId, report.progress.stage ?? 'init');
   }
+  // A terminal event may overtake a coalesced progress report. Persist its
+  // final checkpoint first so an immediate block failure cannot erase the
+  // completed byte count or chunk display from the task ledger.
+  if ((report.type === 'failed' || report.type === 'cancelled') && report.progress) {
+    const progress = report.progress;
+    const accepted = await runtime.executorEvent({
+      ...identity,
+      type: 'progress',
+      downloadedBytes: progress.downloadedBytes ?? 0,
+      estimatedBytes: progress.estimatedBytes,
+      phase: progress.stage === 'mux' ? 'processing' : 'fetching',
+    });
+    const checkpoint = (await runtime.snapshot()).jobs.find(job => job.jobId === command.jobId);
+    if (accepted)
+      await updateProgress(
+        command.requestId,
+        {
+          ...progress,
+          stage: progress.stage ?? 'init',
+          downloadedBytes: checkpoint?.progress.downloadedBytes ?? 0,
+        },
+        { revision: checkpoint?.updatedAt },
+      );
+  }
   if (report.type === 'acknowledged') {
     await runtime.executorEvent({ ...identity, type: 'acknowledged' });
   } else if (report.type === 'progress') {
@@ -142,9 +170,9 @@ const processReport = async (report: ExecutionReport): Promise<void> => {
         {
           ...report.progress,
           stage: report.progress.stage ?? 'init',
-          downloadedBytes: report.progress.downloadedBytes ?? 0,
+          downloadedBytes: latest?.progress.downloadedBytes ?? report.progress.downloadedBytes ?? 0,
         },
-        { revision: latest?.updatedAt },
+        { revision: latest?.updatedAt, cacheExpiresAt: latest?.cacheExpiresAt },
       );
   } else if (report.type === 'output') {
     if (job.state === 'starting') await runtime.executorEvent({ ...identity, type: 'acknowledged' });
@@ -163,11 +191,21 @@ const processReport = async (report: ExecutionReport): Promise<void> => {
     if (
       await runtime.executorEvent(
         report.type === 'failed'
-          ? { ...identity, type: 'failed', reason: report.reason }
+          ? {
+              ...identity,
+              type: 'failed',
+              reason: report.reason,
+              recoverable: report.recoverable,
+              failureKind: report.failureKind,
+            }
           : { ...identity, type: 'cancelled' },
       )
     ) {
-      if (report.type === 'failed' && command.execution.item)
+      if (
+        report.type === 'failed' &&
+        command.execution.item &&
+        (await runtime.snapshot()).jobs.find(job => job.jobId === command.jobId)?.state === 'failed'
+      )
         await addHistoryEntry(command.execution.item, 'failed', report.reason);
       await forgetExecution(command);
     }
@@ -198,7 +236,23 @@ const reconcileBrowserDownload = async (downloadId: number) => {
   const records = await inventoryRecords();
   const record = records.find(record => record.command.executionId === job.executionId);
   if (record?.report.type === 'output')
-    await sendOffscreen({ type: 'offscreen/cleanup-blob', payload: { blobUrl: record.report.output.blobUrl } });
+    await sendOffscreen({
+      type: 'offscreen/cleanup-blob',
+      payload: { blobUrl: record.report.output.blobUrl, preserveOutput: state !== 'complete' },
+    });
+  if (state === 'complete') {
+    await ensureOffscreen();
+    await sendOffscreen({
+      type: 'offscreen/stop-execution',
+      payload: {
+        jobId: job.jobId,
+        requestId: job.requestId,
+        executionId: job.executionId,
+        attempt: job.attempt,
+        intent: 'cancel',
+      },
+    });
+  }
   await removeHeadersForDownload(job.executionId ?? job.requestId);
   const accepted = await runtime.browserDelivery({
     jobId: job.jobId,
@@ -227,6 +281,7 @@ const stopExecution: NonNullable<ExecutorAdapter['cancel']> = async identity => 
   const job = (await runtime.snapshot()).jobs.find(job => job.jobId === identity.jobId);
   if (!job) return;
   if (!job.artifactReady) {
+    if (identity.intent === 'cancel' && !(await hasOffscreen())) await ensureOffscreen();
     if (await hasOffscreen()) await sendOffscreen({ type: 'offscreen/stop-execution', payload: identity });
     return;
   }
@@ -242,10 +297,32 @@ const stopExecution: NonNullable<ExecutorAdapter['cancel']> = async identity => 
   const record = (await inventoryRecords()).find(record => record.command.executionId === identity.executionId);
   if (identity.intent === 'cancel' && record?.report.type === 'output')
     await sendOffscreen({ type: 'offscreen/cleanup-blob', payload: { blobUrl: record.report.output.blobUrl } });
+  if (identity.intent === 'cancel') {
+    await ensureOffscreen();
+    await sendOffscreen({ type: 'offscreen/stop-execution', payload: identity });
+  }
   await removeHeadersForDownload(identity.executionId);
   await runtime.executorEvent({ ...identity, type: 'cancelled' });
   if (identity.intent === 'cancel' && record) await forgetExecution(record.command);
 };
+const collectDownloadCache = () =>
+  serializeEvent(async () => {
+    const existed = await hasOffscreen();
+    await ensureOffscreen();
+    const result = await sendOffscreen({ type: 'offscreen/collect-download-cache' });
+    if (!existed) {
+      const jobs = (await runtime.snapshot()).jobs;
+      if (
+        !jobs.some(
+          job =>
+            ['queued', 'starting', 'running', 'finalizing'].includes(job.state) ||
+            (job.artifactReady && job.state === 'paused'),
+        )
+      )
+        await chrome.offscreen.closeDocument();
+    }
+    return result;
+  });
 const beginDelivery = (report: Extract<ExecutionReport, { type: 'output' }>) => {
   const { command, output } = report;
   if (deliveries.has(command.executionId)) return;
@@ -371,11 +448,16 @@ const queueReady = setQueueExecutor(
           : (execution.fileName ?? deriveFileName(execution.url, execution.title));
         const prepared: ExecutorCommand = {
           ...command,
-          execution: { ...execution, fileName, headers: scopeHeaders(execution.headers, execution.url) },
+          execution: {
+            ...execution,
+            fileName,
+            headers: scopeHeaders(execution.headers, execution.url),
+            audioHeaders: execution.audioUrl ? scopeHeaders(execution.audioHeaders, execution.audioUrl) : undefined,
+          },
         };
         await updateProgress(
           command.requestId,
-          { stage: 'init', downloadedBytes: 0 },
+          { stage: 'init', downloadedBytes: current?.progress.downloadedBytes ?? 0 },
           {
             item: execution.item,
             outputFormat: execution.outputFormat,
@@ -407,8 +489,23 @@ const queueReady = setQueueExecutor(
     resumeDelivery: async jobId => {
       const job = (await runtime.snapshot()).jobs.find(job => job.jobId === jobId);
       const record = (await inventoryRecords()).find(record => record.command.executionId === job?.executionId);
-      if (!job || record?.report.type !== 'output') throw new Error('Paused delivery artifact unavailable');
-      beginDelivery(record.report);
+      if (!job || !job.executionId) throw new Error('Saved delivery task unavailable');
+      if (record?.report.type === 'output') {
+        beginDelivery(record.report);
+        return;
+      }
+      await ensureOffscreen();
+      const command: ExecutorCommand = {
+        jobId: job.jobId,
+        requestId: job.requestId,
+        attempt: job.attempt,
+        executionId: job.executionId,
+        execution: job.execution,
+        display: job.display,
+        resumeDelivery: true,
+      };
+      const accepted = await sendOffscreen({ type: 'offscreen/start-execution', payload: { command } }, 10);
+      if (accepted.report) await handleExecutionReport(accepted.report);
     },
   },
   async () => {
@@ -464,13 +561,59 @@ const retryDownload = (key: string, intent: 'resume' | 'retry') =>
   serializeEvent(() => commandDownload(key, { type: intent }));
 const cancelDownloadsForTab = (tabId: number) => serializeEvent(() => cancelTabJobs(tabId));
 const clearDownloads = (keys?: string[]) => serializeEvent(() => clearJobList(keys));
+const handleMeteredDownloads = () => serializeEvent(pauseMeteredDownloads);
+const batchPauseDownloads = () => serializeEvent(pauseAllDownloads);
+const batchResumeDownloads = () => serializeEvent(resumeAllDownloads);
+const cacheOverview = async () => {
+  await ensureOffscreen();
+  const status = await sendOffscreen({ type: 'offscreen/cache-status-read' });
+  const { records = [] } = await downloadCache.command({ operation: 'list' });
+  const jobs = (await runtime.snapshot()).jobs;
+  const rows = jobs
+    .map(job => ({
+      key: job.requestId,
+      title: job.display.title ?? job.execution.fileName ?? 'Download',
+      state: job.state,
+      allocatedBytes: records
+        .filter(record => record.jobKey === job.requestId)
+        .reduce((sum, record) => sum + record.size, 0),
+      expiresAt: Math.max(
+        0,
+        ...records.filter(record => record.jobKey === job.requestId).map(record => record.expiresAt),
+      ),
+      clearable: ['paused', 'failed'].includes(job.state),
+    }))
+    .filter(row => row.allocatedBytes > 0);
+  return {
+    rows,
+    allocatedBytes: rows.reduce((sum, row) => sum + row.allocatedBytes, 0),
+    networkCost: (await chrome.storage.local.get('uuget-network-cost'))['uuget-network-cost'],
+    persistence: status.persistence,
+  };
+};
+const discardCachedDownloads = (keys?: string[]) =>
+  serializeEvent(async () => {
+    let cleared = 0;
+    for (const job of (await runtime.snapshot()).jobs)
+      if (['paused', 'failed'].includes(job.state) && (!keys || keys.includes(job.requestId))) {
+        await commandDownload(job.jobId, { type: 'cancel' });
+        cleared++;
+      }
+    return cleared;
+  });
 export {
   handleDownload,
+  handleMeteredDownloads,
+  batchPauseDownloads,
+  batchResumeDownloads,
+  cacheOverview,
+  discardCachedDownloads,
   againDownload,
   pauseDownload,
   cancelDownload,
   retryDownload,
   cancelDownloadsForTab,
   clearDownloads,
+  collectDownloadCache,
   handleExecutionReport,
 };

@@ -74,6 +74,19 @@ export class OpfsWritableMap {
     this.entries.get(name)?.sync.flush();
   }
 
+  readAt(name: string, position: number, length: number): Uint8Array {
+    const entry = this.entries.get(name);
+    if (!entry) throw new Error(`OPFS entry not open: ${name}`);
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    while (offset < length) {
+      const count = entry.sync.read(bytes.subarray(offset), { at: position + offset });
+      if (count <= 0) throw new Error('OPFS checkpoint read stalled');
+      offset += count;
+    }
+    return bytes;
+  }
+
   writeAt(name: string, pos: number, chunk: Uint8Array | ArrayBuffer): number {
     const entry = this.entries.get(name);
     if (!entry) throw new Error(`OPFS entry not open: ${name}`);

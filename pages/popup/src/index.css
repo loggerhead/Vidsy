@@ -64,3 +64,25 @@ body,
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Keep Add link anchored above the toolbar as it opens. */
+.popup-add-link-panel {
+  animation: popup-add-link-reveal 160ms ease-out;
+}
+
+@keyframes popup-add-link-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-add-link-panel {
+    animation: none;
+  }
+}

@@ -1,7 +1,7 @@
 {
-  "name": "vidsy",
+  "name": "uuget",
   "version": "1.1.0",
-  "description": "Browser extension to detect and download media from any webpage",
+  "description": "UUGet — Video Downloader. Find videos on the web. Save them in one click.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,11 +11,12 @@
     "clean": "pnpm clean:bundle && pnpm clean:turbo && pnpm clean:node_modules",
     "clean:install": "pnpm clean:node_modules && pnpm install --frozen-lockfile",
     "type-check": "turbo type-check",
-    "build": "wxt build",
+    "build": "wxt build && pnpm sync:chrome-artifact",
+    "sync:chrome-artifact": "node tools/sync-chrome-artifact.mjs",
     "build:firefox": "wxt build --browser firefox",
     "dev": "wxt",
     "dev:firefox": "wxt --browser firefox",
-    "zip": "wxt zip",
+    "zip": "wxt zip && pnpm sync:chrome-artifact",
     "zip:firefox": "wxt zip --browser firefox",
     "e2e": "pnpm build && pnpm -F @extension/e2e e2e",
     "e2e:login": "node tests/e2e/login.mjs",
@@ -28,8 +29,8 @@
     "copy-env": "bash bash-scripts/copy_env.sh",
     "set-global-env": "bash bash-scripts/set_global_env.sh",
     "wxt:prepare": "wxt prepare",
-    "wxt:build": "wxt build",
-    "wxt:zip": "wxt zip",
+    "wxt:build": "pnpm build",
+    "wxt:zip": "pnpm zip",
     "postinstall": "pnpm copy-env && wxt prepare"
   },
   "dependencies": {

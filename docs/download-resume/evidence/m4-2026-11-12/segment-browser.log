@@ -1,0 +1,16 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m3.test.ts -t M4
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m3.test.ts (12 tests | 10 skipped) 9335ms
+   ✓ M4 hls large segment resumes within the segment after browser restart 3719ms
+   ✓ M4 dash large segment resumes within the segment after browser restart 3759ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 10 skipped (12)
+   Start at  14:08:04
+   Duration  9.88s (tests 96%, import 4%)
+

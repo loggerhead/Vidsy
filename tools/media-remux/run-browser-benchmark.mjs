@@ -34,7 +34,7 @@ for (const suffix of ['mjs', 'wasm.mjs', 'wasm.wasm']) {
 }
 
 const fixture = await readFile(fixturePath);
-const pageHtml = `<!doctype html><meta charset="utf-8"><title>Vidsy remux benchmark</title>`;
+const pageHtml = `<!doctype html><meta charset="utf-8"><title>UUGet remux benchmark</title>`;
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (url.pathname === '/') {

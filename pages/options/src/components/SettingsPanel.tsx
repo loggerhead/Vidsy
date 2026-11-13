@@ -1,3 +1,4 @@
+import { DownloadCachePanel } from './DownloadCachePanel';
 import { Toggle } from './Toggle';
 import { useStorage } from '@extension/shared';
 import { mediaSettingsStorage, exampleThemeStorage } from '@extension/storage';
@@ -61,7 +62,7 @@ export const SettingsPanel = ({ isLight }: { isLight: boolean }) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `vidsy-diagnostics-${Date.now()}.json`;
+    link.download = `uuget-diagnostics-${Date.now()}.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
@@ -88,9 +89,10 @@ export const SettingsPanel = ({ isLight }: { isLight: boolean }) => {
           Export
         </button>
       </div>
+      <DownloadCachePanel isLight={isLight} />
       <div>
         <h2 className={cn('text-lg font-semibold', label)}>Preferences</h2>
-        <p className={cn('mt-1 text-sm', sub)}>Customize how Vidsy works</p>
+        <p className={cn('mt-1 text-sm', sub)}>Customize how UUGet works</p>
       </div>
 
       <div className={cardCls}>
@@ -175,7 +177,7 @@ export const SettingsPanel = ({ isLight }: { isLight: boolean }) => {
             <div>
               <p className={cn('text-sm font-medium', label)}>Catch browser downloads</p>
               <p className={cn('text-xs', sub)}>
-                Offer to handle video/audio downloads through Vidsy instead of saving with the browser
+                Offer to handle video/audio downloads through UUGet instead of saving with the browser
               </p>
             </div>
           </div>

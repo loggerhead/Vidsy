@@ -1,3 +1,7 @@
+import { DownloadFailure } from '../lib/download-failure';
+import { httpDate } from '../lib/http-validator';
+import type { HttpValidationMethod } from '../lib/http-validator';
+
 export const expectedResponseBytes = (response: Response): number | undefined => {
   const rawLength = response.headers.get('content-length');
   if (!rawLength) return undefined;
@@ -12,12 +16,26 @@ export const assertSuccessfulResponse = (response: Response): void => {
 export const assertCompleteResponse = (response: Response, actualBytes: number): void => {
   const expectedBytes = expectedResponseBytes(response);
   if (expectedBytes !== undefined && actualBytes !== expectedBytes) {
-    throw new Error(`Response body length mismatch: expected ${expectedBytes} bytes, received ${actualBytes}`);
+    throw new DownloadFailure(
+      'integrity',
+      `Response body length mismatch: expected ${expectedBytes} bytes, received ${actualBytes}`,
+    );
   }
 };
 
-export type ExpectedRange = { start: number; end: number; total?: number; resourceVersion?: string };
-export class RangeResponseError extends Error {}
+export type ExpectedRange = {
+  start: number;
+  end: number;
+  total?: number;
+  resourceVersion?: string;
+  weakEtag?: string;
+  validationMethod?: HttpValidationMethod;
+};
+export class RangeResponseError extends DownloadFailure {
+  constructor(message: string) {
+    super('integrity', message);
+  }
+}
 
 export const assertRangeResponse = (response: Response, range: ExpectedRange, actualBytes?: number): void => {
   const match = response.headers.get('content-range')?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
@@ -29,7 +47,11 @@ export const assertRangeResponse = (response: Response, range: ExpectedRange, ac
     !Number.isSafeInteger(Number(match[3])) ||
     Number(match[3]) <= range.end ||
     (range.total !== undefined && Number(match[3]) !== range.total) ||
-    (range.resourceVersion && response.headers.get('etag') !== range.resourceVersion)
+    (range.weakEtag !== undefined && response.headers.get('etag') !== range.weakEtag) ||
+    (range.resourceVersion &&
+      (range.validationMethod === 'last-modified'
+        ? httpDate(response.headers.get('last-modified')) !== range.resourceVersion
+        : response.headers.get('etag') !== range.resourceVersion))
   ) {
     throw new RangeResponseError(`Invalid Range response: expected bytes ${range.start}-${range.end}/${range.total}`);
   }

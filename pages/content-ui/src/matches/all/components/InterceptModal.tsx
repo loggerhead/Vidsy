@@ -424,7 +424,7 @@ export const InterceptModal = ({ intercept, onClose }: { intercept: Intercept; o
             fontStyle: 'italic',
             textAlign: 'center',
           }}>
-          To turn this off, go to Vidsy Options → Catch browser downloads
+          To turn this off, go to UUGet Options → Catch browser downloads
         </div>
 
         {/* Button row */}

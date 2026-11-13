@@ -25,10 +25,35 @@ test('resume requires matching resource identity, range layout and retained file
     const registry = new RangeResumeRegistry();
     registry.begin('file', source, 0);
     registry.completed('file', chunk);
-    assert.equal(registry.begin('file', changed, size), undefined);
+    assert.throws(() => registry.begin('file', changed, size), /Range identity/);
   }
   const registry = new RangeResumeRegistry();
   registry.begin('file', source, 0);
   registry.completed('file', chunk);
   assert.deepEqual(registry.begin('file', source, 4), [chunk]);
+});
+
+test('persisted range records validate indices and recover only completed intervals', () => {
+  const original = new RangeResumeRegistry();
+  original.begin('file', source, 0);
+  original.completed('file', chunk);
+  const recreated = new RangeResumeRegistry();
+  recreated.restore('file', original.snapshot('file'));
+  assert.deepEqual(recreated.begin('file', source, 4), [chunk]);
+  recreated.restore('file', {
+    done: [chunk],
+    source: {
+      ranges: source.ranges.map(({ start, end }) => ({ end, start })),
+      totalBytes: source.totalBytes,
+      resourceVersion: source.resourceVersion,
+      url: source.url,
+    },
+  });
+  assert.deepEqual(
+    recreated.begin('file', source, 4),
+    [chunk],
+    'storage dictionary key order cannot invalidate identical content',
+  );
+  assert.throws(() => recreated.restore('file', { source, done: [{ ...chunk, i: 99 }] }), /indices/);
+  assert.throws(() => recreated.restore('file', { source, done: [chunk, chunk] }), /indices/);
 });

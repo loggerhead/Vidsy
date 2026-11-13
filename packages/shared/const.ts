@@ -1,3 +1,3 @@
 export const PROJECT_URL_OBJECT = {
-  url: 'https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite',
+  url: 'https://uu0uu.com',
 } as const;

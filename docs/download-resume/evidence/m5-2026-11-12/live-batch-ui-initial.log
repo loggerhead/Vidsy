@@ -1,0 +1,67 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m3.test.ts specs/resume-m5.test.ts
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m5.test.ts (9 tests) 58692ms
+   ✓ paused details distinguish visible progress from verified cache, next offset and remaining payload 1563ms
+   ✓ popup Pause all includes queued work and side-panel Resume all preserves configured concurrency 16974ms
+   ✓ settings expose cache usage, persistent-storage outcome, update existing TTL and discard only paused files 1190ms
+   ✓ cancel after an interrupted executor restart cleans cache even when its execution identity was lost 1712ms
+   ✓ a paused download associated with its original page survives a complete browser restart 1381ms
+   ✓ after browser restart an exact reopened source page renews an expired URL despite a stale tab ID 8842ms
+   ✓ a reported cellular transition pauses valid cache without recovery and explicit Resume allows this connection 7856ms
+   ✓ manual metered fallback pauses active work and holds new downloads before network dispatch 8327ms
+   ✓ a non-Range source offers Stop; a batch pause explicitly resumes by downloading the whole stream again 9045ms
+ ❯ specs/resume-m3.test.ts (18 tests | 2 failed) 89971ms
+   ✓ M5 hls completed live output pauses and survives restart for local delivery 1603ms
+   ✓ M4 hls expired manifest preserves cached parts and provides re-detection guidance 574ms
+   ✓ M4 hls large segment resumes within the segment after browser restart 3388ms
+   ✓ hls VOD cross-session resume only fetches missing segments 1643ms
+   ✓ hls retains complete video and resumes only unfinished audio 1931ms
+   ✓ hls manifest/sequence drift explicitly restarts instead of splicing old segments 872ms
+   ✓ hls live snapshot Stop stops transport and never promises Resume 489ms
+   × hls live snapshot Pause all stops transport and never promises Resume 30483ms
+   ✓ M5 dash completed live output pauses and survives restart for local delivery 1810ms
+   ✓ M4 dash expired manifest preserves cached parts and provides re-detection guidance 743ms
+   ✓ M4 dash large segment resumes within the segment after browser restart 3598ms
+   ✓ dash VOD cross-session resume only fetches missing segments 1840ms
+   ✓ dash retains complete video and resumes only unfinished audio 1870ms
+   ✓ dash manifest/sequence drift explicitly restarts instead of splicing old segments 1097ms
+   ✓ dash live snapshot Stop stops transport and never promises Resume 941ms
+   × dash live snapshot Pause all stops transport and never promises Resume 30818ms
+   ✓ hls completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 2793ms
+   ✓ dash completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 2740ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  specs/resume-m3.test.ts > hls live snapshot Pause all stops transport and never promises Resume
+ FAIL  specs/resume-m3.test.ts > dash live snapshot Pause all stops transport and never promises Resume
+TimeoutError: locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: 'Pause all', exact: true })[22m
+
+ ❯ specs/resume-m3.test.ts:409:71
+    407|         }, key);
+    408|         expect(names.length).toBeGreaterThan(0);
+    409|         await page.getByRole('button', { name: action, exact: true }).…
+       |                                                                       ^
+    410|         await waitStage(key, 'cancelled');
+    411|         if (action === 'Pause all') expect((await progress(key)).error…
+ ❯ runWithAgent helpers/browser.ts:129:5
+ ❯ withNewPage helpers/browser.ts:120:5
+ ❯ specs/resume-m3.test.ts:395:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 25 passed (27)
+   Start at  16:26:36
+   Duration  149.85s (tests 99%, import 1%)
+
+/Users/bytedance/my-projects/Vidsy/tests/e2e:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @extension/e2e@1.1.0 e2e: `vitest run --config vitest.config.ts specs/resume-m3.test.ts specs/resume-m5.test.ts`
+Exit status 1

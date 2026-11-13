@@ -56,17 +56,17 @@ const sanitizeValue = (value: unknown, seen: WeakSet<object>): unknown => {
   );
 };
 
-export const sanitizeLogData = (data: unknown): unknown => sanitizeValue(data, new WeakSet<object>());
+const sanitizeLogData = (data: unknown): unknown => sanitizeValue(data, new WeakSet<object>());
 
 const isDevelopment = (): boolean => (import.meta as RuntimeEnv).env?.MODE !== 'production';
 type LogMethod = (event: string, data?: unknown) => void;
 
-export type RuntimeLogger = { debug: LogMethod; info: LogMethod; warn: LogMethod; error: LogMethod };
+type RuntimeLogger = { debug: LogMethod; info: LogMethod; warn: LogMethod; error: LogMethod };
 
-export const createLogger = (scope: string): RuntimeLogger => {
+const createLogger = (scope: string): RuntimeLogger => {
   const write = (level: 'debug' | 'info' | 'warn' | 'error', event: string, data?: unknown): void => {
     if ((level === 'debug' || level === 'info') && !isDevelopment()) return;
-    const message = `[Vidsy:${scope}] ${event}`;
+    const message = `[UUGet:${scope}] ${event}`;
     const value = data === undefined ? undefined : sanitizeLogData(data);
     if (level === 'warn') console.warn(message, value ?? '');
     else if (level === 'error') console.error(message, value ?? '');
@@ -79,3 +79,6 @@ export const createLogger = (scope: string): RuntimeLogger => {
     error: (event, data) => write('error', event, data),
   };
 };
+
+export { sanitizeLogData, createLogger };
+export type { RuntimeLogger };

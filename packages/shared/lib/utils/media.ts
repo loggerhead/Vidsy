@@ -94,6 +94,15 @@ export type ChunkProgress = {
 };
 
 export type MediaDownloadProgress = {
+  schemaVersion?: 1;
+  cacheExpiresAt?: number;
+  resumeNotice?: string;
+  cachedBytes?: number;
+  resumeFromBytes?: number;
+  nextRangeOffset?: number;
+  remainingDownloadBytes?: number;
+  resumeCapability?: 'segments' | 'none' | 'range' | 'restart' | 'complete-input' | 'artifact';
+  validationMethod?: 'etag' | 'last-modified' | 'boundary-sample' | 'manifest' | 'local-checksums' | 'mixed';
   key: string; // typically url
   stage: MediaDownloadStage;
   downloadedBytes: number;
@@ -117,6 +126,30 @@ export type MediaDownloadProgress = {
   fallbackReason?: string;
 };
 
+export const describeResumeCapability = (capability: MediaDownloadProgress['resumeCapability']): string =>
+  capability
+    ? {
+        range: 'Verified byte offsets · across sessions',
+        segments: 'Verified VOD segments · across sessions',
+        none: 'Live snapshot · cannot resume',
+        restart: 'No byte resume · Retry downloads again',
+        'complete-input': 'Completed snapshot · Retry processing',
+        artifact: 'Saved output · Deliver again within 24 hours',
+      }[capability]
+    : 'Checking source resume capability…';
+
+export const describeResumeValidation = (method: MediaDownloadProgress['validationMethod']): string | undefined =>
+  method
+    ? {
+        etag: 'Strong ETag',
+        'last-modified': 'Last-Modified + boundary samples',
+        'boundary-sample': 'Length + boundary samples',
+        manifest: 'Playlist identity + segment checksums',
+        'local-checksums': 'Full cached file checksums',
+        mixed: 'Each track validated separately',
+      }[method]
+    : undefined;
+
 export type MediaDownloadState = Record<string, MediaDownloadProgress>;
 
 export type MediaHistoryItem = MediaItem & {
@@ -130,6 +163,8 @@ export type MediaDetectionState = Record<string, MediaItem[]>;
 export type MediaHistoryState = MediaHistoryItem[];
 
 export type MediaSettings = {
+  pauseOnMeteredNetwork?: boolean;
+  manuallyMetered?: boolean;
   enableHlsMerging: boolean;
   maxHistory: number;
   // Optional filename template. When empty, the downloader falls back to deriveFileName.
@@ -143,6 +178,8 @@ export type MediaSettings = {
 };
 
 export const DEFAULT_MEDIA_SETTINGS: MediaSettings = {
+  pauseOnMeteredNetwork: true,
+  manuallyMetered: false,
   enableHlsMerging: true,
   maxHistory: 30,
   filenameTemplate: '',

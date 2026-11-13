@@ -1,0 +1,93 @@
+TAP version 13
+# (node:47849) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# [Vidsy:download] worker.download.snapshot {
+#   key: 'cancel-loading',
+#   stage: 'mux',
+#   activity: 'waiting-mux',
+#   downloadedBytes: 0,
+#   estimatedBytes: undefined,
+#   lastReceivedAt: 1794472929509,
+#   completedParts: undefined,
+#   totalParts: undefined,
+#   disk: undefined
+# }
+# [Vidsy:mux] starting {
+#   planType: 'copy-to-mp4',
+#   inputCount: 1,
+#   inputFormat: 'auto',
+#   outputContainer: 'mp4'
+# }
+# [Vidsy:download] mux.failed {
+#   key: 'cancel-loading',
+#   error: { name: 'AbortError', message: 'This operation was aborted' }
+# }
+# [Vidsy:mux] failed {
+#   error: { name: 'AbortError', message: 'This operation was aborted' }
+# }
+# Subtest: cancel while loading libav prevents ffmpeg and releases the late instance
+ok 1 - cancel while loading libav prevents ffmpeg and releases the late instance
+  ---
+  duration_ms: 267.709792
+  type: 'test'
+  ...
+# (node:47850) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: HLS download orchestration preserves separate tracks and validates delivery
+    # Subtest: master default downloads and muxes both tracks
+    ok 1 - master default downloads and muxes both tracks
+      ---
+      duration_ms: 8.183667
+      type: 'test'
+      ...
+    # Subtest: explicit quality retains its paired audio
+    ok 2 - explicit quality retains its paired audio
+      ---
+      duration_ms: 1.456375
+      type: 'test'
+      ...
+    # Subtest: separate authenticated HLS tracks keep their own credentials for probes and payload
+    ok 3 - separate authenticated HLS tracks keep their own credentials for probes and payload
+      ---
+      duration_ms: 3.713917
+      type: 'test'
+      ...
+    # Subtest: audio failure retains completed video and never muxes
+    ok 4 - audio failure retains completed video and never muxes
+      ---
+      duration_ms: 1.137375
+      type: 'test'
+      ...
+    # Subtest: mux failure retains both fully downloaded HLS track inputs
+    ok 5 - mux failure retains both fully downloaded HLS track inputs
+      ---
+      duration_ms: 0.905417
+      type: 'test'
+      ...
+    # Subtest: silent output fails the real artifact validator
+    ok 6 - silent output fails the real artifact validator
+      ---
+      duration_ms: 1.12025
+      type: 'test'
+      ...
+    # Subtest: cancel between tracks stops audio and cleans video
+    ok 7 - cancel between tracks stops audio and cleans video
+      ---
+      duration_ms: 0.726542
+      type: 'test'
+      ...
+    1..7
+ok 2 - HLS download orchestration preserves separate tracks and validates delivery
+  ---
+  duration_ms: 292.554959
+  type: 'test'
+  ...
+1..2
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 579.701792

@@ -7,7 +7,13 @@
 // Range downloads include the live per-connection breakdown reported by the worker.
 
 import { downloadPercent } from '../lib/download-percent';
-import { MEDIA_MESSAGE, formatSpeed, useStorage } from '@extension/shared';
+import {
+  MEDIA_MESSAGE,
+  formatSpeed,
+  useStorage,
+  describeResumeCapability,
+  describeResumeValidation,
+} from '@extension/shared';
 import { mediaSettingsStorage } from '@extension/storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChunkProgress, MediaDownloadProgress } from '@extension/shared';
@@ -225,8 +231,8 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
   const isActive = ACTIVE_STAGES.has(entry.stage);
   const isMuxing = entry.stage === 'mux' || entry.stage === 'finalize';
   const eta = speed > 0 && totalBytes > downloadedBytes ? (totalBytes - downloadedBytes) / speed : undefined;
-  const isHttpDirect = entry.item?.kind === 'video' || entry.item?.kind === 'audio';
-  const resumeCapability = isHttpDirect ? 'When supported' : 'Restart only';
+  const canPause = entry.resumeCapability !== undefined && !['none', 'restart'].includes(entry.resumeCapability);
+  const resumeCapability = describeResumeCapability(entry.resumeCapability);
   const transferLabel =
     entry.transferMode === 'range'
       ? `Parallel Range${entry.connectionLimit ? ` · up to ${entry.connectionLimit}` : ''}`
@@ -293,6 +299,7 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
             </div>
           </div>
 
+          {entry.resumeNotice ? <p className={`mb-3 break-words text-[11px] ${muted}`}>{entry.resumeNotice}</p> : null}
           <div className={`mb-2 rounded-lg border px-4 py-2 ${card}`}>
             <p className={`text-[10px] uppercase tracking-wider ${labelCol}`}>Address</p>
             <p className={`mt-1 truncate text-[11px] ${isLight ? 'text-blue-600' : 'text-blue-400'}`} title={sourceUrl}>
@@ -400,6 +407,14 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
               {speed > 0 && !isMuxing ? formatSpeed(speed) : '—'}
             </span>
           </div>
+          {entry.validationMethod ? (
+            <div className="flex items-center justify-between gap-3">
+              <span className={`shrink-0 text-[11px] ${labelCol}`}>Validation</span>
+              <span className={`text-right text-[11px] font-medium ${valueCol}`}>
+                {describeResumeValidation(entry.validationMethod)}
+              </span>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-3">
             <span className={`shrink-0 text-[11px] ${labelCol}`}>Transport</span>
             <span className={`truncate text-right text-[11px] font-medium ${valueCol}`} title={entry.fallbackReason}>
@@ -423,6 +438,25 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
           </div>
         </div>
 
+        {entry.stage === 'paused' && entry.cachedBytes !== undefined ? (
+          <div className="mb-3 space-y-1 text-[11px]">
+            <p>
+              Cached media: {entry.cachedBytes === 0 ? '0 B' : formatBytes(entry.cachedBytes)} · Resume from verified
+              cache: {formatBytes(entry.resumeFromBytes)}
+            </p>
+            {entry.nextRangeOffset !== undefined ? <p>Next payload byte offset: {entry.nextRangeOffset}</p> : null}
+            <p>
+              Estimated remaining download:{' '}
+              {entry.remainingDownloadBytes === 0 ? '0 B' : formatBytes(entry.remainingDownloadBytes)}
+            </p>
+          </div>
+        ) : null}
+        {entry.resumeNotice ? <p className={`mb-3 break-words text-[11px] ${muted}`}>{entry.resumeNotice}</p> : null}
+        {entry.error ? (
+          <p role="alert" className="mb-3 break-words text-[11px] text-red-500">
+            {entry.error}
+          </p>
+        ) : null}
         {/* Progress bar */}
         <div
           className={`relative mb-3 h-6 w-full overflow-hidden rounded-md ${isLight ? 'bg-gray-200' : 'bg-white/[0.06]'}`}>
@@ -632,13 +666,13 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
         {isActive ? (
           <div className="flex justify-end gap-2">
             <button
-              onClick={onPause}
+              onClick={canPause ? onPause : onCancel}
               className={`min-w-[100px] rounded-md px-4 py-2 text-[12px] font-semibold transition ${
                 isLight
                   ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
                   : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
               }`}>
-              Pause
+              {entry.resumeCapability === 'none' ? 'Stop snapshot' : canPause ? 'Pause' : 'Stop (cannot resume bytes)'}
             </button>
             <button
               onClick={onCancel}
@@ -657,7 +691,15 @@ export const DownloadDetailsView = ({ downloads, isLight }: Props) => {
                   ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                   : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
               }`}>
-              {entry.stage === 'paused' ? 'Resume' : 'Retry'}
+              {entry.resumeCapability === 'artifact'
+                ? 'Deliver again'
+                : entry.resumeCapability === 'none'
+                  ? 'Restart snapshot'
+                  : entry.stage === 'paused'
+                    ? entry.resumeCapability === 'restart'
+                      ? 'Resume (downloads again)'
+                      : 'Resume'
+                    : 'Retry'}
             </button>
             <button
               onClick={onCloseWindow}

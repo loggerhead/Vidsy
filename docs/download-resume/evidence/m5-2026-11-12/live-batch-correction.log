@@ -1,0 +1,16 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m3.test.ts -t 'live snapshot Pause all'
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m3.test.ts (18 tests | 16 skipped) 2798ms
+   ✓ hls live snapshot Pause all stops transport and never promises Resume 766ms
+   ✓ dash live snapshot Pause all stops transport and never promises Resume 618ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 16 skipped (18)
+   Start at  16:32:32
+   Duration  3.41s (tests 85%, import 14%, transform 1%)
+

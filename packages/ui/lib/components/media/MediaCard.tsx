@@ -215,7 +215,7 @@ export const MediaCard = ({
                   'flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold',
                   isLight ? 'bg-amber-50 text-amber-700' : 'bg-amber-500/15 text-amber-400',
                 )}
-                title="The player feeds this video through MediaSource Extensions. The source is a per-page blob URL with no fetchable manifest, so Vidsy can't download it.">
+                title="The player feeds this video through MediaSource Extensions. The source is a per-page blob URL with no fetchable manifest, so UUGet can't download it.">
                 MSE — no fetchable source
               </span>
             </div>
@@ -226,7 +226,7 @@ export const MediaCard = ({
                   'flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold',
                   isLight ? 'bg-red-50 text-red-600' : 'bg-red-500/15 text-red-400',
                 )}
-                title="This stream is DRM-protected (Widevine, PlayReady, or FairPlay). Vidsy cannot decrypt protected streams.">
+                title="This stream is DRM-protected (Widevine, PlayReady, or FairPlay). UUGet cannot decrypt protected streams.">
                 <IconLock /> DRM-protected
               </span>
             </div>

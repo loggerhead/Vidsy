@@ -1,0 +1,38 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/download-pipeline.test.ts
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/download-pipeline.test.ts (24 tests) 61670ms
+   ✓ durable download pipeline (24)
+     ✓ downloads and validates HTTP through the production queue 708ms
+     ✓ downloads and validates HLS through the production queue 488ms
+     ✓ downloads and validates DASH through the production queue 932ms
+     ✓ downloads and validates separate audio/video through the production queue 521ms
+     ✓ assembles a single-resource HLS playlist using exact byte ranges 579ms
+     ✓ rechecks an unknown start outcome after both start and inventory transport failures 497ms
+     ✓ pause and resume preserve completed byte ranges 5284ms
+     ✓ resumes separate video and audio without refetching completed track ranges 3527ms
+     ✓ persistent 403 at 50% retries only missing ranges and preserves visible progress 12295ms
+     ✓ a failed request can retry, and a fresh request can download the same URL again 1615ms
+     ✓ cancels queued work before network dispatch and removes cancelled partial files 1318ms
+     ✓ reattaches to a running offscreen execution after the background stops 3000ms
+     ✓ isolates captured credentials for concurrent requests on the same CDN 5603ms
+     ✓ limits actual concurrent public downloads to the configured two jobs 4160ms
+     ✓ reports integrity failure and discards cached input when a server ignores a Range request 352ms
+     ✓ does not forward source credentials to a cross-origin HLS rendition 971ms
+     ✓ pauses during delayed browser acceptance and resumes from the retained artifact 2934ms
+     ✓ releases a finalizing task when its browser download record is missing 717ms
+     ✓ clears terminal task records without blocking the next download 791ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash/manifest.mpd 1044ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash-layout/manifest.mpd 908ms
+     ✓ standalone controls resume the same task and create a fresh identity after cancellation 8049ms
+     ✓ popup, side panel and options clear history through the background writer 3605ms
+
+ Test Files  1 passed (1)
+      Tests  24 passed (24)
+   Start at  16:12:06
+   Duration  62.47s (tests 99%, import 1%)
+

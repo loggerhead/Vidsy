@@ -31,7 +31,7 @@ export const AboutPanel = ({ isLight }: { isLight: boolean }) => {
     <div className="space-y-6">
       <div>
         <h2 className={cn('text-lg font-semibold', label)}>About</h2>
-        <p className={cn('mt-1 text-sm', sub)}>Vidsy v1.0.0</p>
+        <p className={cn('mt-1 text-sm', sub)}>UUGet v{chrome.runtime.getManifest().version}</p>
       </div>
 
       <div className={cardCls}>
@@ -44,10 +44,18 @@ export const AboutPanel = ({ isLight }: { isLight: boolean }) => {
             🎬
           </div>
           <div>
-            <h3 className={cn('text-base font-bold', label)}>Vidsy</h3>
-            <p className={cn('text-sm', sub)}>Detect and download video &amp; audio from any website</p>
+            <h3 className={cn('text-base font-bold', label)}>UUGet</h3>
+            <p className={cn('text-sm', sub)}>Find videos on the web. Save them in one click.</p>
           </div>
         </div>
+
+        <a
+          href="https://uu0uu.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mb-6 inline-block text-sm font-medium text-blue-500 hover:underline">
+          uu0uu.com
+        </a>
 
         <div className="grid grid-cols-2 gap-3">
           {features.map(f => (

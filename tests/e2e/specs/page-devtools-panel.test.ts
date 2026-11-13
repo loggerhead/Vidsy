@@ -9,7 +9,7 @@ describe('Extension DevTools panel', () => {
   it('opens and switches theme', async () =>
     withPage(async (page, agent) => {
       await page.goto(extensionUrl('devtools-panel.html'));
-      expect(await page.title()).toBe('Devtools Panel');
+      expect(await page.title()).toBe('UUGet — Developer Tools');
       await aiAssert(agent, 'The extension DevTools panel has loaded');
       await canSwitchTheme(page, agent);
     }));

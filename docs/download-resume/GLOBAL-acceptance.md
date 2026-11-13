@@ -1,0 +1,26 @@
+# Global download recovery acceptance — 2026-11-12
+
+The authoritative objective is [requirements.md](requirements.md). M0–M5 pass their independent sequential gates. All required implementation, local acceptance and evidence archival are complete. The final full browser suite passed 97 enabled cases with no failures; four existing opt-in external live-account cases were skipped.
+
+| Download path | Interruption and retry behavior | Integrity gate and evidence |
+| --- | --- | --- |
+| HTTP Range | Durable internal <=1 MiB offsets; preserve valid input after transfer failure, restart, crash or reload; Retry requests missing payload | Exact validator/length/coordinates; full cached hashes; weak/alias remote samples. M1 browser restart/crash/reload; M2 disconnect/alarm; M4 reset/date/weak/mutation; worker range-fetch and response-validation tests |
+| Separate HTTP audio/video | Independent retained inputs and ranges; incomplete track continues, complete input skips media requests for processing Retry | Both tracks probed before payload; same HTTP gates per track; separate headers. Pipeline independent-track/concurrency tests and M0 real merged mux failure |
+| HLS/DASH VOD | Persistent manifest/track/part identities; complete parts survive, Range parts retain internal offsets; changed playlist/sequence explicitly discards old parts | Manifest fingerprints, strict indices/range coordinates, full local hashes, atomic completed parts. M3 VOD/independent-track/drift/restart; M4 large parts; worker segment-checkpoints/transport tests |
+| HTTP no Range / non-Range segments | Stop/download-again semantics; incomplete direct stream restarts in full, incomplete part restarts atomically, complete parts/inputs remain useful | Complete length/hash/track/container checks. M5 real no-Range retransmission and UI; M0 stream MP3 processing Retry; segment-policy/checkpoint tests |
+| Live HLS/DASH | Incomplete finite snapshot stops without resume; completed frozen inputs retry processing across restart; completed output can be delivered again | Original frozen manifest, full local hashes, output metadata proof. M3 live Stop, completed mux failure/restart and M5 saved-live-output pause/restart tests |
+| Mux / MP3 conversion | Processing failure preserves complete immutable inputs; Retry runs processing without media or manifest fetches | Full input hash proof and output container/track/duration checks; invalid processing output remains a processing failure. M0 five real-worker cases; HLS silent output and worker mux-cancel orchestration |
+| Native output delivery | Interrupted generated output survives with 24-hour lease; restart verifies and publishes a fresh Blob; cancel clears entire owned family | Full-file hashes plus output metadata proof before publication; cancellation fences late hash/Blob. M4 actual native interruption/restart/corruption/cancel/expiry, output-delivery and persistent-artifact tests |
+
+## Definition of Done mapping
+
+1. Every download path has documented, actionable recovery semantics and corresponding positive/negative tests in the table above.
+2. Restore never bypasses identity, response or checksum gates. Wrong Range coordinates, ignored Range, changed validators/length, manifest/sequence drift, boundary mismatch, local interior corruption, legacy missing hashes, output mutation and expiry are covered. Affected input restarts have visible reasons; independent valid inputs remain retained.
+3. Actual isolated browser restart, SIGKILL crash, extension reload, 30-second disconnection/reconnection, real suspended-service-worker recovery alarms, real worker mux failure and persistent single-block 403 are reproducible in M0–M4. Host-sleep wake policy uses overdue-clock/runtime recreation; actual host sleep was not invoked.
+4. Core: 202 passed; package/page units: 48 passed; processing/cancel orchestration: nine passed; all 17 type-check packages, production build, relevant ESLint and patch checks passed. Final browser regression: 97 passed, zero failures, four opt-in external cases skipped (19 passing files, one skipped file).
+5. README and CHANGELOG contain M0–M5 capability/limit descriptions, honest Stop/download-again/live semantics, metered fallback, storage management and recovery/delivery leases.
+6. Cancel and cache discard remove ledger/file ownership, including after lost execution identity; TTL and whole-job LRU collect expired/orphaned families while protecting active jobs. M1 TTL/LRU/restart cancel, M4 saved-output family cancel/expiry, M5 interrupted-executor cancel and cache settings tests prove this behavior. Quota/failed cache acknowledgement halts transfer rather than fetching indefinitely without durable checkpoints.
+
+## Independent acceptance and evidence
+
+See [M0](M0-acceptance.md), [M1](M1-acceptance.md), [M2](M2-acceptance.md), [M3](M3-acceptance.md), [M4](M4-acceptance.md), and [M5](M5-acceptance.md). The [final M5 evidence folder](evidence/m5-2026-11-12) contains command logs, initial failure/correction records, the final passing sweep, environment metadata, source/bundle fingerprints and a SHA-256 manifest. No commit, push, version change, live-account run, cloud component, native resident process or actual host sleep is claimed.

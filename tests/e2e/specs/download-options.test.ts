@@ -41,8 +41,8 @@ describe('Player download options', () => {
               audioMimeType: 'audio/mp4',
             })),
           );
+          await chrome.storage.local.set({ 'media-downloads': {} });
           await chrome.storage.session.set({
-            'media-downloads': {},
             'media-detections': {
               [tab.id]: [
                 {
@@ -84,7 +84,7 @@ describe('Player download options', () => {
       expect(await panel.getByRole('radio', { checked: true }).getAttribute('id')).toContain('1080-av01');
       const jobs = () =>
         extensionWorker().evaluate(async videoId => {
-          const downloads = (await chrome.storage.session.get('media-downloads'))['media-downloads'] ?? {};
+          const downloads = (await chrome.storage.local.get('media-downloads'))['media-downloads'] ?? {};
           return (Object.values(downloads) as MediaDownloadProgress[]).filter(entry => entry.item?.id === videoId);
         }, videoId);
       expect(await jobs()).toHaveLength(0);

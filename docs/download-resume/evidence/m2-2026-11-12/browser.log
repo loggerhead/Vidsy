@@ -1,0 +1,13 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m2.test.ts (3 tests) 73668ms
+   ✓ 30 seconds offline automatically pauses and reconnects without repeating completed media intervals 38478ms
+   ✓ cancel while waiting for automatic recovery stops future alarms and deletes cache 32631ms
+   ✓ persistent 403 stays failed and preserves progress without automatic retries 497ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  12:29:10
+   Duration  74.29s (tests 99%, import 1%)
+

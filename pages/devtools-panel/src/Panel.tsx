@@ -15,11 +15,9 @@ const Panel = () => {
     <div className={cn('App', isLight ? 'bg-slate-50' : 'bg-gray-800')}>
       <header className={cn('App-header', isLight ? 'text-gray-900' : 'text-gray-100')}>
         <button onClick={goGithubSite}>
-          <img src={chrome.runtime.getURL(logo)} className="App-logo" alt="logo" />
+          <img src={chrome.runtime.getURL(logo)} className="App-logo" alt="UUGet" />
         </button>
-        <p>
-          Edit <code>pages/devtools-panel/src/Panel.tsx</code>
-        </p>
+        <p>UUGet media tools</p>
         <ToggleButton onClick={exampleThemeStorage.toggle}>{t('toggleTheme')}</ToggleButton>
       </header>
     </div>

@@ -1,0 +1,19 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m4-http.test.ts specs/download-pipeline.test.ts -t '410 without|isolates captured credentials|clear history'
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/download-pipeline.test.ts (24 tests | 22 skipped) 6967ms
+   ✓ durable download pipeline (24)
+     ✓ isolates captured credentials for concurrent requests on the same CDN 4622ms
+     ✓ popup, side panel and options clear history through the background writer 966ms
+ ✓ specs/resume-m4-http.test.ts (14 tests | 13 skipped) 1889ms
+   ✓ 410 without an available source page preserves progress and explains how to re-detect 1174ms
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 35 skipped (38)
+   Start at  16:16:18
+   Duration  9.88s (tests 91%, import 8%)
+

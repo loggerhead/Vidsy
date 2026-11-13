@@ -1,0 +1,46 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m0.test.ts specs/resume-m3.test.ts specs/resume-m4-http.test.ts
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m4-http.test.ts (13 tests) 94387ms
+   ✓ /date.mp4 resumes verified weak-source cache after browser restart 8915ms
+   ✓ /weak-date.mp4 resumes verified weak-source cache after browser restart 8484ms
+   ✓ /none.mp4 resumes verified weak-source cache after browser restart 10144ms
+   ✓ an interrupted large Range resumes inside its chunk with at most 1 MiB lost payload 8984ms
+   ✓ validator-free boundary mismatch explicitly discards old bytes and delivers the new complete file 7680ms
+   ✓ mutating an interior cached byte is detected before resume and triggers an explained full restart 8723ms
+   ✓ an interrupted native delivery survives browser restart and is delivered without a media request 8597ms
+   ✓ expired signed URL is reparsed once and verified cached ranges survive the new URL 8522ms
+   ✓ 410 without an available source page preserves progress and explains how to re-detect 847ms
+   ✓ a renewed URL that still returns 403 stops after one reparse and retains its checkpoints 1062ms
+   ✓ cancel after restart deletes the saved output and its entire input family 1322ms
+   ✓ saved output mutation fails before native publication; another Retry downloads a validated replacement 10901ms
+   ✓ expired output metadata is removed without extending or deleting the shared input lease 9312ms
+ ✓ specs/resume-m3.test.ts (12 tests) 25441ms
+   ✓ M4 hls large segment resumes within the segment after browser restart 3473ms
+   ✓ hls VOD cross-session resume only fetches missing segments 1457ms
+   ✓ hls retains complete video and resumes only unfinished audio 1665ms
+   ✓ hls manifest/sequence drift explicitly restarts instead of splicing old segments 815ms
+   ✓ hls live snapshot exposes Stop and never promises Resume 803ms
+   ✓ M4 dash large segment resumes within the segment after browser restart 3475ms
+   ✓ dash VOD cross-session resume only fetches missing segments 1681ms
+   ✓ dash retains complete video and resumes only unfinished audio 1747ms
+   ✓ dash manifest/sequence drift explicitly restarts instead of splicing old segments 1217ms
+   ✓ dash live snapshot exposes Stop and never promises Resume 508ms
+   ✓ hls completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 4622ms
+   ✓ dash completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 3223ms
+ ✓ specs/resume-m0.test.ts (5 tests) 3193ms
+   ✓ real merged mux failure retains inputs; Retry performs no media requests and delivers validated tracks 515ms
+   ✓ real HTTP MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 388ms
+   ✓ real stream MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 439ms
+   ✓ real HLS mux failure retains inputs; Retry performs no media requests and delivers validated tracks 441ms
+   ✓ real DASH mux failure retains inputs; Retry performs no media requests and delivers validated tracks 711ms
+
+ Test Files  3 passed (3)
+      Tests  30 passed (30)
+   Start at  14:24:19
+   Duration  124.56s (tests 99%, import 1%)
+

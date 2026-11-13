@@ -1,14 +1,22 @@
+import { shouldDiscardInput, failureKind, LiveSnapshotFailure } from './download-failure';
 import { dashManifestDurationSeconds, jsfetchInputForOpfs, jsfetchInputForUrl, preflightDiskSpace } from './libav-mux';
 import { describeDash, describeDirectFile, mergeTrackDescriptors } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
 import { planMediaProcessing } from './media-processing';
+import { HttpRequestError } from './network-request';
+import { opfsJobName } from './opfs-job-name';
 import { prepareOutputDelivery } from './output-delivery';
 import { updateProgress } from './progress';
-import { activeAbortControllers } from './segment-fetcher';
-import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs } from './worker-client';
+import { activeAbortControllers, downloadStopIntents } from './segment-fetcher';
+import {
+  prepareSegmentedSource,
+  rememberSegmentedDescriptor,
+  isLiveDash,
+  readFrozenSegmentedSnapshot,
+} from './segmented-resume';
+import { cancelWorkerJob, fetchSegmentsToOpfs, getOpfsFile, removeOpfs, discardWorkerJobFiles } from './worker-client';
 
-const opfsNameFor = (key: string, tag: string, ext: string): string =>
-  `dash-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}-${tag}-${Date.now().toString(36)}.${ext}`;
+const opfsNameFor = (key: string, tag: string, ext: string): Promise<string> => opfsJobName('dash', key, tag, ext);
 
 // ─── DASH types ───
 
@@ -54,6 +62,7 @@ const parseDashSegmentTemplate = (
   const repId = rep.getAttribute('id') ?? '';
   const bandwidth = rep.getAttribute('bandwidth') ?? '';
   const startNumber = Number(template.getAttribute('startNumber') ?? '1');
+  if (!Number.isSafeInteger(startNumber) || startNumber < 0) throw new Error('Invalid DASH segment start number');
 
   const replaceTpl = (tpl: string, vars: Record<string, string>) =>
     tpl.replace(/\$(RepresentationID|Bandwidth|Number|Time)(?:%0(\d+)d)?\$/g, (token, name: string, width?: string) => {
@@ -159,10 +168,11 @@ const extractDashSegmentUrls = (
 
 const fetchMpdText = async (manifestUrl: string, signal: AbortSignal): Promise<string> => {
   const res = await fetch(manifestUrl, {
+    cache: 'no-store',
     credentials: 'include',
     signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
   });
-  if (!res.ok) throw new Error(`Failed to fetch DASH manifest: ${res.status}`);
+  if (!res.ok) throw new HttpRequestError(res.status, manifestUrl);
   return res.text();
 };
 
@@ -220,16 +230,25 @@ export const downloadDashMuxed = async (
   let videoBlobUrl: string | null = null;
   let audioBlobUrl: string | null = null;
   let outputOpfsName: string | null = null;
+  let live = false;
   try {
     await updateProgress(key, { stage: 'fetch-manifest', downloadedBytes: 0 });
     // Fetch the MPD once — we need it for duration in both paths and for
     // segment URLs in the auth-fallback path.
-    const mpdText = await fetchMpdText(manifestUrl, abortController.signal);
+    const frozen = await readFrozenSegmentedSnapshot(key);
+    const mpdText =
+      frozen?.kind === 'dash' ? frozen.manifestText : await fetchMpdText(manifestUrl, abortController.signal);
+    live = isLiveDash(mpdText);
+    const source = await prepareSegmentedSource(key, { kind: 'dash', manifestUrl, mpdText, headers }, live, {
+      kind: 'dash',
+      url: manifestUrl,
+      manifestText: mpdText,
+    });
     const durationSeconds = dashManifestDurationSeconds(mpdText);
-    let descriptor = describeDash(mpdText, durationSeconds);
+    let descriptor = source.descriptor ?? describeDash(mpdText, durationSeconds);
     let plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
     let outputContainer = plan.output.container;
-    outputOpfsName = opfsNameFor(key, 'out', outputContainer);
+    outputOpfsName = await opfsNameFor(key, 'out', outputContainer);
     const useAuthFallback = true; // All representations share the global download budget.
 
     abortController.signal.throwIfAborted();
@@ -256,26 +275,29 @@ export const downloadDashMuxed = async (
       let totalBytes = 0;
 
       if (tracks.video) {
-        videoInputOpfs = opfsNameFor(key, 'in-video', 'mp4');
+        videoInputOpfs = await opfsNameFor(key, 'in-video', 'mp4');
         const { totalBytes: vb } = await fetchSegmentsToOpfs({
           jobKey: key,
           opfsName: videoInputOpfs,
           segments: tracks.video.segmentUrls.map((url, i) => ({ url, sequenceNumber: i })),
           initUrl: tracks.video.initUrl,
+          manifestIdentity: mpdText,
           keyHeaders: headers,
           stage: 'download-video',
         });
         totalBytes += vb;
       }
       if (tracks.audio) {
-        audioInputOpfs = opfsNameFor(key, 'in-audio', 'mp4');
+        audioInputOpfs = await opfsNameFor(key, 'in-audio', 'mp4');
         const { totalBytes: ab } = await fetchSegmentsToOpfs({
           jobKey: key,
           opfsName: audioInputOpfs,
           segments: tracks.audio.segmentUrls.map((url, i) => ({ url, sequenceNumber: i })),
           initUrl: tracks.audio.initUrl,
+          manifestIdentity: mpdText,
           keyHeaders: headers,
           stage: 'download-audio',
+          progressOffset: totalBytes,
         });
         totalBytes += ab;
       }
@@ -293,6 +315,7 @@ export const downloadDashMuxed = async (
       ].filter((file): file is File => file !== null);
       const inputDescriptors = await Promise.all(inputFiles.map(file => describeDirectFile(file, 'separate-tracks')));
       descriptor = mergeTrackDescriptors(inputDescriptors);
+      await rememberSegmentedDescriptor(key, source, descriptor);
       plan = requireExecutablePlan(planMediaProcessing(descriptor, output === 'mp3' ? 'mp3' : 'media'));
       if (plan.type === 'passthrough' || plan.type === 'concatenate-fmp4') {
         throw new Error(`Unexpected ${plan.type} plan for prefetched DASH tracks`);
@@ -300,7 +323,7 @@ export const downloadDashMuxed = async (
       if (plan.output.container !== outputContainer) {
         if (outputOpfsName) await removeOpfs(outputOpfsName).catch(() => undefined);
         outputContainer = plan.output.container;
-        outputOpfsName = opfsNameFor(key, 'out', outputContainer);
+        outputOpfsName = await opfsNameFor(key, 'out', outputContainer);
       }
       const inputUrls =
         plan.type === 'transcode-audio-to-mp3'
@@ -319,24 +342,25 @@ export const downloadDashMuxed = async (
       if (audioBlobUrl) URL.revokeObjectURL(audioBlobUrl);
       videoBlobUrl = null;
       audioBlobUrl = null;
-      if (videoInputOpfs) {
-        await removeOpfs(videoInputOpfs).catch(() => undefined);
-        videoInputOpfs = null;
-      }
-      if (audioInputOpfs) {
-        await removeOpfs(audioInputOpfs).catch(() => undefined);
-        audioInputOpfs = null;
-      }
     }
 
     const outputFile = await getOpfsFile(outputOpfsName);
     const delivery = await prepareOutputDelivery({
+      signal: abortController.signal,
       jobKey: key,
       file: outputFile,
       opfsName: outputOpfsName,
       plan,
       expectedDurationSeconds: durationSeconds,
     });
+    if (videoInputOpfs) {
+      await removeOpfs(videoInputOpfs).catch(() => undefined);
+      videoInputOpfs = null;
+    }
+    if (audioInputOpfs) {
+      await removeOpfs(audioInputOpfs).catch(() => undefined);
+      audioInputOpfs = null;
+    }
     return delivery;
   } catch (err) {
     if (videoBlobUrl) {
@@ -353,10 +377,13 @@ export const downloadDashMuxed = async (
         /* ignore */
       }
     }
-    if (videoInputOpfs) await removeOpfs(videoInputOpfs).catch(() => undefined);
-    if (audioInputOpfs) await removeOpfs(audioInputOpfs).catch(() => undefined);
+    if (live && failureKind(err) !== 'processing') await discardWorkerJobFiles(key);
+    if ((live && failureKind(err) !== 'processing') || shouldDiscardInput(err, downloadStopIntents.get(key))) {
+      if (videoInputOpfs) await removeOpfs(videoInputOpfs).catch(() => undefined);
+      if (audioInputOpfs) await removeOpfs(audioInputOpfs).catch(() => undefined);
+    }
     if (outputOpfsName) await removeOpfs(outputOpfsName).catch(() => undefined);
-    throw err;
+    throw live && failureKind(err) === 'transport' ? new LiveSnapshotFailure(err) : err;
   } finally {
     activeAbortControllers.delete(key);
     if (abortController.signal.aborted) {

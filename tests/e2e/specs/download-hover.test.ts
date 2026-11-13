@@ -24,6 +24,8 @@ const setProgress = async (progress: Partial<MediaDownloadProgress>) =>
       };
       await chrome.storage.session.set({
         'media-detections': { [tab.id]: [item] },
+      });
+      await chrome.storage.local.set({
         'media-downloads': {
           'hover-task': {
             key: 'hover-task',

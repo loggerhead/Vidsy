@@ -1,0 +1,80 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m2.test.ts (4 tests) 139888ms
+   ✓ 30 seconds offline automatically pauses and reconnects without repeating completed media intervals 37975ms
+   ✓ cancel while waiting for automatic recovery stops future alarms and deletes cache 32655ms
+   ✓ persistent 403 stays failed and preserves progress without automatic retries 497ms
+   ✓ a persistent recovery alarm restarts a suspended background and continues cached bytes 67663ms
+ ✓ specs/download-pipeline.test.ts (24 tests) 53363ms
+   ✓ durable download pipeline (24)
+     ✓ downloads and validates HTTP through the production queue 776ms
+     ✓ downloads and validates DASH through the production queue 374ms
+     ✓ assembles a single-resource HLS playlist using exact byte ranges 398ms
+     ✓ rechecks an unknown start outcome after both start and inventory transport failures 339ms
+     ✓ pause and resume preserve completed byte ranges 4247ms
+     ✓ resumes separate video and audio without refetching completed track ranges 3665ms
+     ✓ persistent 403 at 50% retries only missing ranges and preserves visible progress 11617ms
+     ✓ a failed request can retry, and a fresh request can download the same URL again 568ms
+     ✓ cancels queued work before network dispatch and removes cancelled partial files 882ms
+     ✓ reattaches to a running offscreen execution after the background stops 2820ms
+     ✓ isolates captured credentials for concurrent requests on the same CDN 4651ms
+     ✓ limits actual concurrent public downloads to the configured two jobs 4193ms
+     ✓ does not forward source credentials to a cross-origin HLS rendition 413ms
+     ✓ pauses during delayed browser acceptance and resumes from the retained artifact 2555ms
+     ✓ releases a finalizing task when its browser download record is missing 461ms
+     ✓ clears terminal task records without blocking the next download 569ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash/manifest.mpd 584ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash-layout/manifest.mpd 591ms
+     ✓ standalone controls resume the same task and create a fresh identity after cancellation 8299ms
+     ✓ popup, side panel and options clear history through the background writer 3539ms
+ ✓ specs/resume-m1.test.ts (7 tests) 37993ms
+   ✓ browser restart restores a paused half-file and Resume all requests only missing media intervals 8564ms
+   ✓ an abrupt browser crash restores an interrupted task as paused from its durable checkpoint 8242ms
+   ✓ extension reload restores retained checkpoints before continuing the same task 8608ms
+   ✓ redetection matches the retained content fingerprint and continues its original task identity 7984ms
+   ✓ TTL removes expired partial files and checkpoints while leaving an actionable reason 744ms
+   ✓ capacity LRU removes the oldest paused input set and preserves the newer checkpoint 1314ms
+   ✓ cancel after a browser restart immediately removes retained files and the checkpoint ledger 1827ms
+ ✓ specs/resume-m0.test.ts (5 tests) 2860ms
+   ✓ real merged mux failure retains inputs; Retry performs no media requests and delivers validated tracks 555ms
+   ✓ real HTTP MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 338ms
+   ✓ real stream MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 429ms
+   ✓ real HLS mux failure retains inputs; Retry performs no media requests and delivers validated tracks 387ms
+   ✓ real DASH mux failure retains inputs; Retry performs no media requests and delivers validated tracks 502ms
+ ✓ specs/page-content-ui.test.ts (2 tests) 1629ms
+   ✓ Content UI injection (2)
+     ✓ injects all and example UI on example.com 938ms
+ ✓ specs/download-options.test.ts (1 test) 1758ms
+   ✓ Player download options (1)
+     ✓ groups qualities, preserves selection and submits only the explicit download action 1020ms
+ ✓ specs/media-remux.test.ts (1 test) 1862ms
+   ✓ HEVC media remux (1)
+     ✓ detects HLS, shows progress, and downloads HEVC + AAC 1147ms
+ ✓ specs/page-new-tab.test.ts (1 test) 895ms
+ ✓ specs/download-hover.test.ts (2 tests) 1489ms
+   ✓ Player download hover details (2)
+     ✓ shows persisted failure reasons on hover and keyboard focus 534ms
+     ✓ shows current download activity and keeps details inside a small viewport 318ms
+ ✓ specs/page-content.test.ts (1 test) 1788ms
+   ✓ Content script lifecycle (1)
+     ✓ mounts the all-sites content UI and removes it on stop 1160ms
+ ✓ specs/page-popup.test.ts (2 tests) 1529ms
+   ✓ Extension popup (2)
+     ✓ shows current-page media, other-page downloads, and labeled toolbar actions 701ms
+ ✓ specs/smoke.test.ts (1 test) 1891ms
+   ✓ Example page (1)
+     ✓ loads 1165ms
+ ✓ specs/page-options.test.ts (1 test) 1047ms
+ ✓ specs/page-devtools-panel.test.ts (1 test) 933ms
+ ✓ specs/page-side-panel.test.ts (1 test) 774ms
+ ✓ specs/page-content-runtime.test.ts (1 test) 747ms
+ ↓ specs/live-download-sites.test.ts (4 tests | 4 skipped)
+
+ Test Files  16 passed | 1 skipped (17)
+      Tests  55 passed | 4 skipped (59)
+   Start at  12:37:40
+   Duration  257.88s (tests 98%, import 2%)
+
+
+EXIT_CODE=0

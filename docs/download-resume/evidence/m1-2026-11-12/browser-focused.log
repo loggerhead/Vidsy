@@ -1,0 +1,17 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m1.test.ts (7 tests) 41094ms
+   ✓ browser restart restores a paused half-file and Resume all requests only missing media intervals 10058ms
+   ✓ an abrupt browser crash restores an interrupted task as paused from its durable checkpoint 8250ms
+   ✓ extension reload restores retained checkpoints before continuing the same task 8650ms
+   ✓ redetection matches the retained content fingerprint and continues its original task identity 7407ms
+   ✓ TTL removes expired partial files and checkpoints while leaving an actionable reason 750ms
+   ✓ capacity LRU removes the oldest paused input set and preserves the newer checkpoint 1341ms
+   ✓ cancel after a browser restart immediately removes retained files and the checkpoint ledger 1821ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  12:16:36
+   Duration  41.69s (tests 99%, import 1%)
+

@@ -1,0 +1,26 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m3.test.ts (10 tests) 14051ms
+   ✓ hls VOD cross-session resume only fetches missing segments 1726ms
+   ✓ hls retains complete video and resumes only unfinished audio 1467ms
+   ✓ hls manifest/sequence drift explicitly restarts instead of splicing old segments 644ms
+   ✓ hls live snapshot exposes Stop and never promises Resume 398ms
+   ✓ dash VOD cross-session resume only fetches missing segments 1478ms
+   ✓ dash retains complete video and resumes only unfinished audio 1503ms
+   ✓ dash manifest/sequence drift explicitly restarts instead of splicing old segments 816ms
+   ✓ dash live snapshot exposes Stop and never promises Resume 688ms
+   ✓ hls completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 1931ms
+   ✓ dash completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 1941ms
+ ✓ specs/resume-m0.test.ts (5 tests) 2808ms
+   ✓ real merged mux failure retains inputs; Retry performs no media requests and delivers validated tracks 514ms
+   ✓ real HTTP MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 332ms
+   ✓ real stream MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 321ms
+   ✓ real HLS mux failure retains inputs; Retry performs no media requests and delivers validated tracks 440ms
+   ✓ real DASH mux failure retains inputs; Retry performs no media requests and delivers validated tracks 559ms
+
+ Test Files  2 passed (2)
+      Tests  15 passed (15)
+   Start at  12:57:00
+   Duration  17.86s (tests 95%, import 4%)
+

@@ -1,32 +1,32 @@
 {
   "extensionDescription": {
     "description": "Extension description",
-    "message": "웹 페이지에서 비디오와 오디오를 감지하고 다운로드합니다. 멀티 커넥션 HTTP/HLS/DASH 지원과 브라우저 다운로드 가로채기 옵션 제공."
+    "message": "Find videos on the web. Save them in one click. Download video and audio with HTTP, HLS, and DASH support."
   },
   "extensionName": {
     "description": "Extension name",
-    "message": "Vidsy"
+    "message": "UUGet — Video Downloader"
   },
   "toggleTheme": {
-    "message": "테마 변경"
+    "message": "Toggle theme"
   },
   "displayErrorInfo": {
-    "message": "오류 발생"
+    "message": "An error occurred"
   },
   "displayErrorDescription": {
-    "message": "죄송합니다. 페이지를 로드하는 중 문제가 발생했습니다."
+    "message": "Sorry, something went wrong while loading the page."
   },
   "displayErrorDetailsInfo": {
-    "message": "오류 세부 정보:"
+    "message": "Error details:"
   },
   "displayErrorUnknownErrorInfo": {
-    "message": "알 수 없는 오류"
+    "message": "Unknown error"
   },
   "displayErrorReset": {
-    "message": "다시 실행"
+    "message": "Try again"
   },
   "hello": {
     "description": "Placeholder example",
-    "message": "안녕하세요, $1님"
+    "message": "Hello $1"
   }
 }

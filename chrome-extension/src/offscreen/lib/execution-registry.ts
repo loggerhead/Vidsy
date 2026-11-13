@@ -1,3 +1,5 @@
+import { explainFailure, failureKind } from './download-failure';
+import { automaticallyRecoverable } from './network-request';
 import type { OutputArtifact } from './output-artifact';
 import type { ExecutorCommand, ExecutorEvent } from '../../background/lib/download-runtime';
 import type { MediaDownloadProgress } from '@extension/shared';
@@ -7,8 +9,14 @@ export type ExecutionReport = { command: ExecutorCommand; sequence?: number } & 
   | { type: 'acknowledged' }
   | { type: 'progress'; progress: Partial<MediaDownloadProgress> }
   | { type: 'output'; output: ExecutionOutput }
-  | { type: 'failed'; reason: string }
-  | { type: 'cancelled' }
+  | {
+      type: 'failed';
+      reason: string;
+      failureKind?: 'transport' | 'processing' | 'integrity';
+      recoverable?: boolean;
+      progress?: Partial<MediaDownloadProgress>;
+    }
+  | { type: 'cancelled'; progress?: Partial<MediaDownloadProgress> }
 );
 export type ExecutionRecord = {
   command: ExecutorCommand;
@@ -22,8 +30,10 @@ export const createExecutionRegistry = (dependencies: {
   execute: (command: ExecutorCommand) => Promise<ExecutionOutput>;
   stop: (command: ExecutorCommand, intent: 'pause' | 'cancel') => Promise<void>;
   publish: (report: ExecutionReport) => Promise<unknown>;
+  discard?: (command: ExecutorCommand) => Promise<void>;
 }) => {
   const records = new Map<string, ExecutionRecord>();
+  const running = new Map<string, Promise<void>>();
   type Delivery = {
     sequence: number;
     inFlight: boolean;
@@ -112,7 +122,7 @@ export const createExecutionRegistry = (dependencies: {
       const record: ExecutionRecord = { command, report: { command, type: 'acknowledged' } };
       records.set(command.executionId, record);
       publish(record, record.report);
-      void Promise.resolve()
+      const execution = Promise.resolve()
         .then(async () => {
           if (record.stop) throw new Error('Download cancelled');
           return dependencies.execute(command);
@@ -122,24 +132,32 @@ export const createExecutionRegistry = (dependencies: {
             publish(record, { command, type: 'output', output });
           },
           error => {
+            const progress = record.report.type === 'progress' ? record.report.progress : undefined;
             publish(
               record,
               record.stop
-                ? { command, type: 'cancelled' }
+                ? { command, type: 'cancelled', ...(progress ? { progress } : {}) }
                 : {
                     command,
                     type: 'failed',
-                    reason: error instanceof Error ? error.message : String(error),
+                    reason: explainFailure(error),
+                    recoverable: automaticallyRecoverable(error),
+                    failureKind: failureKind(error),
+                    ...(progress ? { progress } : {}),
                   },
             );
           },
         );
+      running.set(command.executionId, execution);
+      void execution.finally(() => running.delete(command.executionId));
     },
     async stop(executionId: string, intent: 'pause' | 'cancel') {
       const record = records.get(executionId);
       if (!record) return;
       record.stop = intent;
       await dependencies.stop(record.command, intent);
+      await running.get(executionId);
+      if (intent === 'cancel') await dependencies.discard?.(record.command);
     },
     progress(key: string, progress: Partial<MediaDownloadProgress>): boolean {
       const record = [...records.values()].find(record => record.command.requestId === key);

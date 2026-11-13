@@ -11,6 +11,7 @@ const registerOutputForCleanup = (blobUrl: string, opfsName: string): void => {
 
 type CleanupDependencies = {
   revokeObjectUrl?: (url: string) => void;
+  preserveOutput?: boolean;
   removeOutput?: (opfsName: string) => Promise<void>;
 };
 
@@ -24,7 +25,7 @@ const cleanupBlob = async (blobUrl: string, dependencies: CleanupDependencies = 
     /* ignore */
   }
   try {
-    await (dependencies.removeOutput ?? removeOpfs)(entry.opfsName);
+    if (!dependencies.preserveOutput) await (dependencies.removeOutput ?? removeOpfs)(entry.opfsName);
   } catch {
     /* ignore */
   }

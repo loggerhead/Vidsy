@@ -11,17 +11,28 @@ import {
 import {
   cancelDownloadsForTab,
   handleDownload,
+  batchPauseDownloads,
+  handleMeteredDownloads,
+  batchResumeDownloads,
+  cacheOverview,
+  discardCachedDownloads,
   againDownload,
   pauseDownload,
   cancelDownload,
   retryDownload,
   clearDownloads,
+  collectDownloadCache,
   handleExecutionReport,
 } from './lib/download';
+import { cachedDownloadBytes } from './lib/download-cache';
+import { downloadCache } from './lib/download-cache-store';
 import { recordDownloadDiagnostic } from './lib/download-diagnostics';
 import { setupDownloadInterceptor, resumeBrowserDownload, openDownloadsWindow } from './lib/download-interceptor';
-import { reorderQueueItem, runtime as downloadRuntime } from './lib/download-queue';
+import { reorderQueueItem, runtime as downloadRuntime, handleDownloadNetworkChange } from './lib/download-queue';
 import {
+  findCapturedHeaders,
+  injectHeadersForDownload,
+  removeHeadersForDownload,
   authorizeUrlForDownload,
   releaseUrlForDownload,
   clearCapturedHeadersForTab,
@@ -32,13 +43,37 @@ import { clearHistory } from './lib/history';
 import { deriveKind, deriveFileName } from './lib/media-utils';
 import { createNetworkCaptureAdmission } from './lib/network-capture-admission';
 import { classifyAndAddUrl } from './lib/paste-url';
+import { updateProgress } from './lib/progress';
+import { selectRenewedUrl, renewalChanged, selectSourceTab } from './lib/source-renewal';
 import { createTabWorkLifecycle } from './lib/tab-work-lifecycle';
 import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
-import { configureSessionAccessLevel } from '@extension/storage';
+import { configureSessionAccessLevel, mediaSettingsStorage } from '@extension/storage';
 import type { MediaMessage } from '@extension/shared';
 
 export const startBackground = (): void => {
   const log = createLogger('background');
+  globalThis.addEventListener(
+    'online',
+    () => void handleDownloadNetworkChange(true).catch(error => log.warn('recovery.online_failed', String(error))),
+  );
+  globalThis.addEventListener(
+    'offline',
+    () => void handleDownloadNetworkChange(false).catch(error => log.warn('recovery.offline_failed', String(error))),
+  );
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes['media-settings']) return;
+    const previous = changes['media-settings'].oldValue ?? {};
+    const next = changes['media-settings'].newValue ?? {};
+    if (next.cacheRetentionDays !== previous.cacheRetentionDays) {
+      const days = Math.max(1, Math.min(365, Number.isFinite(next.cacheRetentionDays) ? next.cacheRetentionDays : 7));
+      void downloadCache.command({ operation: 'set-retention', ttlMs: days * 86400000 }).catch(() => undefined);
+    }
+    if (
+      (next.manuallyMetered && !previous.manuallyMetered) ||
+      (next.pauseOnMeteredNetwork !== false && previous.pauseOnMeteredNetwork === false)
+    )
+      void handleMeteredDownloads().catch(() => undefined);
+  });
   const sessionAccessReady = configureSessionAccessLevel().catch((error: unknown) => {
     log.error('storage.session_access_failed', error);
   });
@@ -146,8 +181,24 @@ export const startBackground = (): void => {
   );
 
   // ─── Message listener ───
+  void chrome.alarms.create('uuget-cache-gc', { periodInMinutes: 15 });
+  chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === 'uuget-cache-gc')
+      void collectDownloadCache().catch(error => log.warn('cache.gc_failed', String(error)));
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   chrome.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
+    if (
+      message?.type === 'offscreen/network-state' &&
+      sender.url?.endsWith('/offscreen.html') &&
+      typeof message.online === 'boolean'
+    ) {
+      void handleDownloadNetworkChange(message.online).then(
+        () => sendResponse({ ok: true }),
+        error => sendResponse({ ok: false, error: String(error) }),
+      );
+      return true;
+    }
     log.debug('message.received', {
       type: message?.type,
       senderTabId: sender.tab?.id,
@@ -187,6 +238,225 @@ export const startBackground = (): void => {
         sendResponse({ ok: true });
         return;
       }
+      if (message.type === 'offscreen/download-settings') {
+        const settings = await mediaSettingsStorage.get();
+        sendResponse({
+          downloadConnectionsPerFile: settings.downloadConnectionsPerFile,
+          cacheRetentionDays: settings.cacheRetentionDays ?? 7,
+          cacheMaxBytes: settings.cacheMaxBytes ?? 5 * 1024 ** 3,
+        });
+        return;
+      }
+      if (message.type === 'offscreen/download-cache') {
+        const response = await downloadCache.command(message.payload);
+        if (message.payload.operation === 'write' && response.record) {
+          const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === response.record!.jobKey);
+          if (job)
+            await downloadRuntime.command(job.jobId, { type: 'cache-lease', expiresAt: response.record.expiresAt });
+        }
+        sendResponse(response);
+        return;
+      }
+      if (message.type === 'offscreen/renew-source') {
+        const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === message.payload.key);
+        if (
+          !job ||
+          job.executionId !== message.payload.executionId ||
+          job.state !== 'running' ||
+          job.pauseRequested ||
+          job.cancelRequested ||
+          (job.display.tabId === undefined && !job.display.pageUrl)
+        ) {
+          sendResponse({
+            ok: false,
+            error:
+              'Source page is unavailable. Open the original page and re-detect the media to retry; cached progress is retained.',
+          });
+          return;
+        }
+        const sourceTabId = selectSourceTab(job.display.tabId, job.display.pageUrl, await chrome.tabs.query({}));
+        if (sourceTabId === undefined) {
+          sendResponse({
+            ok: false,
+            error:
+              'Original page is missing or ambiguous. Reopen the exact original page and re-detect; cached progress is retained.',
+          });
+          return;
+        }
+        const [scan] = await chrome.scripting.executeScript({
+          target: { tabId: sourceTabId },
+          world: 'MAIN',
+          func: () => {
+            const urls = new Set<string>();
+            document.querySelectorAll<HTMLMediaElement>('video, audio').forEach(media => {
+              for (const url of [media.currentSrc, media.src]) if (url) urls.add(url);
+              media.querySelectorAll<HTMLSourceElement>('source').forEach(source => urls.add(source.src));
+            });
+            return [...urls];
+          },
+        });
+        const candidates = scan?.result ?? [];
+        const url = selectRenewedUrl(job.execution.url, candidates);
+        const audioUrl = job.execution.audioUrl ? selectRenewedUrl(job.execution.audioUrl, candidates) : undefined;
+        const headers = url ? (findCapturedHeaders(url, undefined, sourceTabId) ?? job.execution.headers) : undefined;
+        const audioHeaders = audioUrl
+          ? (findCapturedHeaders(audioUrl, undefined, sourceTabId) ?? job.execution.audioHeaders)
+          : undefined;
+        if (
+          !url ||
+          (job.execution.audioUrl && !audioUrl) ||
+          (!renewalChanged(job.execution.url, job.execution.headers, url, headers) &&
+            (!audioUrl || !renewalChanged(job.execution.audioUrl!, job.execution.audioHeaders, audioUrl, audioHeaders)))
+        ) {
+          sendResponse({
+            ok: false,
+            error:
+              'Source URL or request headers could not be refreshed. Refresh the original page and re-detect the media; cached progress is retained.',
+          });
+          return;
+        }
+        const execution = { ...job.execution, url, headers, audioUrl, audioHeaders, revalidateCompleted: true };
+        const accepted = await downloadRuntime.command(job.jobId, {
+          type: 'source-renewed',
+          executionId: job.executionId!,
+          execution,
+          tabId: sourceTabId,
+        });
+        if (accepted) await removeHeadersForDownload(job.executionId!);
+        if (accepted && headers) await injectHeadersForDownload(url, headers, job.executionId!, sourceTabId);
+        if (accepted && audioUrl && audioHeaders)
+          await injectHeadersForDownload(audioUrl, audioHeaders, job.executionId!, sourceTabId);
+        sendResponse(
+          accepted ? { ok: true, execution } : { ok: false, error: 'Download stopped before source refresh' },
+        );
+        return;
+      }
+      if (message.type === 'offscreen/input-restarted') {
+        const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === message.payload.key);
+        if (!job) {
+          sendResponse({ ok: false, error: 'Download task unavailable' });
+          return;
+        }
+        const { records = [] } = await downloadCache.command({ operation: 'list' });
+        const retainedBytes = cachedDownloadBytes(records.filter(record => record.jobKey === job.requestId));
+        const accepted = await downloadRuntime.command(job.jobId, {
+          type: 'input-restarted',
+          reason: message.payload.reason,
+          retainedBytes,
+        });
+        if (accepted) {
+          const latest = (await downloadRuntime.snapshot()).jobs.find(entry => entry.jobId === job.jobId)!;
+          await updateProgress(
+            job.requestId,
+            {
+              stage: 'download-video',
+              downloadedBytes: retainedBytes,
+              chunks: [],
+              resumeNotice: message.payload.reason,
+            },
+            { revision: latest.updatedAt, clearCacheExpiry: true },
+          );
+        }
+        sendResponse({ ok: accepted });
+        return;
+      }
+      if (message.type === 'offscreen/segmented-state') {
+        const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === message.payload.key);
+        if (!job) {
+          sendResponse({ ok: false, error: 'Download task unavailable' });
+          return;
+        }
+        const source = message.payload.source;
+        if (source) {
+          if (!/^[a-f0-9]{64}$/.test(source.fingerprint) || typeof source.live !== 'boolean')
+            throw new Error('Invalid segmented source identity');
+          const accepted = await downloadRuntime.command(job.jobId, {
+            type: 'segmented-source',
+            source,
+            restartReason: message.payload.restartReason,
+          });
+          if (!accepted) {
+            sendResponse({ ok: false, error: 'Download stopped before source validation' });
+            return;
+          }
+          const latest = (await downloadRuntime.snapshot()).jobs.find(entry => entry.jobId === job.jobId)!;
+          await updateProgress(
+            job.requestId,
+            {
+              stage: 'fetch-manifest',
+              downloadedBytes: latest.progress.downloadedBytes,
+              resumeCapability: latest.execution.reuseSegmentedSnapshot
+                ? 'complete-input'
+                : source.live
+                  ? 'none'
+                  : 'segments',
+              validationMethod: latest.execution.reuseSegmentedSnapshot ? 'local-checksums' : 'manifest',
+              resumeNotice:
+                message.payload.restartReason ??
+                (latest.execution.reuseSegmentedSnapshot
+                  ? 'Verifying completed snapshot inputs; processing Retry performs no media requests.'
+                  : source.live
+                    ? 'Live playlist: saving the current snapshot. Stop discards it; live streams cannot resume.'
+                    : undefined),
+              ...(message.payload.restartReason ? { chunks: [] } : {}),
+            },
+            { revision: latest.updatedAt, clearCacheExpiry: Boolean(message.payload.restartReason) },
+          );
+        }
+        sendResponse({
+          ok: true,
+          source: (await downloadRuntime.snapshot()).jobs.find(entry => entry.jobId === job.jobId)?.segmentedSource,
+          reuseSnapshot: job.execution.reuseSegmentedSnapshot,
+        });
+        return;
+      }
+      if (message.type === 'offscreen/cache-policy') {
+        const settings = await mediaSettingsStorage.get();
+        const jobs = (await downloadRuntime.snapshot()).jobs;
+        const days = settings.cacheRetentionDays ?? 7;
+        sendResponse({
+          jobKeys: jobs
+            .filter(
+              job =>
+                !['cancelled', 'succeeded'].includes(job.state) &&
+                (!job.segmentedSource?.live ||
+                  job.artifactReady ||
+                  job.terminal?.kind === 'processing' ||
+                  job.execution.reuseSegmentedSnapshot ||
+                  ['starting', 'running', 'queued', 'finalizing'].includes(job.state)),
+            )
+            .map(job => job.requestId),
+          activeJobKeys: jobs
+            .filter(job => ['starting', 'running', 'finalizing', 'queued'].includes(job.state))
+            .map(job => job.requestId),
+          ttlMs: Math.max(1, Math.min(365, Number.isFinite(days) ? days : 7)) * 24 * 60 * 60 * 1000,
+          maxBytes:
+            Number.isSafeInteger(settings.cacheMaxBytes) && settings.cacheMaxBytes! >= 1024 * 1024
+              ? settings.cacheMaxBytes
+              : undefined,
+        });
+        return;
+      }
+      if (message.type === 'offscreen/cache-invalidated') {
+        const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === message.payload.jobKey);
+        if (job) {
+          await downloadRuntime.command(job.jobId, { type: 'cache-invalidated', reason: message.payload.reason });
+          const latest = (await downloadRuntime.snapshot()).jobs.find(entry => entry.jobId === job.jobId)!;
+          await updateProgress(
+            job.requestId,
+            {
+              stage: latest.state === 'paused' ? 'paused' : latest.state === 'failed' ? 'failed' : 'init',
+              downloadedBytes: job.progress.downloadedBytes,
+              error: message.payload.reason,
+              resumeNotice: message.payload.reason,
+              resumeCapability: latest.segmentedSource?.live ? 'none' : 'restart',
+            },
+            { revision: latest.updatedAt, clearCacheExpiry: true },
+          );
+        }
+        sendResponse({ ok: true });
+        return;
+      }
       if (message.type === 'offscreen/execution-event') {
         await handleExecutionReport(message.payload);
         sendResponse({ ok: true });
@@ -194,12 +464,29 @@ export const startBackground = (): void => {
       }
       if (message.type === 'offscreen/authorize-download-url') {
         const job = (await downloadRuntime.snapshot()).jobs.find(job => job.requestId === message.payload.key);
-        if (!job?.executionId || job.cancelRequested || job.pauseRequested) {
+        if (
+          !job?.executionId ||
+          !['starting', 'running'].includes(job.state) ||
+          job.cancelRequested ||
+          job.pauseRequested
+        ) {
           sendResponse({ ok: false, error: 'Download cancelled' });
           return;
         }
-        const url = await authorizeUrlForDownload(job.executionId, message.payload.url, message.payload.transient);
-        sendResponse({ ok: true, downloadKey: job.executionId, url });
+        const executionId = job.executionId;
+        const url = await authorizeUrlForDownload(executionId, message.payload.url, message.payload.transient);
+        const current = (await downloadRuntime.snapshot()).jobs.find(item => item.jobId === job.jobId);
+        if (
+          current?.executionId !== executionId ||
+          !['starting', 'running'].includes(current.state) ||
+          current.cancelRequested ||
+          current.pauseRequested
+        ) {
+          await removeHeadersForDownload(executionId);
+          sendResponse({ ok: false, error: 'Download stopped during source authorization' });
+          return;
+        }
+        sendResponse({ ok: true, downloadKey: executionId, url });
         return;
       }
       if (message.type === 'offscreen/release-download-url') {
@@ -208,6 +495,35 @@ export const startBackground = (): void => {
         return;
       }
       const msg = message as MediaMessage;
+      if (message.type === 'media/pause-all') {
+        sendResponse({ ok: true, paused: await batchPauseDownloads() });
+        return;
+      }
+      if (message.type === 'media/cache-list') {
+        sendResponse({ ok: true, ...(await cacheOverview()) });
+        return;
+      }
+      if (message.type === 'media/cache-clear') {
+        sendResponse({ ok: true, cleared: await discardCachedDownloads(message.keys) });
+        return;
+      }
+      if (message.type === 'offscreen/network-cost') {
+        const previous = (await chrome.storage.local.get('uuget-network-cost'))['uuget-network-cost'];
+        await chrome.storage.local.set({ 'uuget-network-cost': message.payload });
+        if (message.payload.metered && !previous?.metered && !(await mediaSettingsStorage.get()).manuallyMetered)
+          await handleMeteredDownloads();
+        sendResponse({ ok: true });
+        return;
+      }
+      if (message.type === 'offscreen/cache-status') {
+        await chrome.storage.local.set({ 'uuget-cache-status': message.payload });
+        sendResponse({ ok: true });
+        return;
+      }
+      if (message.type === 'media/resume-all') {
+        sendResponse({ ok: true, resumed: await batchResumeDownloads() });
+        return;
+      }
       if (msg.type === MEDIA_MESSAGE.DETECTED) {
         if (sender.tab?.id === undefined || !tabWork.isRunning(sender.tab.id)) {
           sendResponse({ ok: false, error: 'Detection is not running for this tab' });
@@ -515,7 +831,7 @@ export const startBackground = (): void => {
     try {
       chrome.contextMenus.create({
         id: 'send-link-to-vidsy',
-        title: 'Send link to Vidsy',
+        title: 'Send link to UUGet',
         contexts: ['link'],
       });
     } catch {

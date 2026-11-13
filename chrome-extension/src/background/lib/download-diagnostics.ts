@@ -26,7 +26,7 @@ const flush = (): void => {
       dirty = revision !== savedRevision;
       if (dirty) timer ??= setTimeout(flush, 5000);
     })
-    .catch(error => console.warn('[Vidsy:diagnostics] persist failed', String(error)));
+    .catch(error => console.warn('[UUGet:diagnostics] persist failed', String(error)));
 };
 
 export const recordDownloadDiagnostic = (event: string, data?: unknown): void => {

@@ -112,7 +112,7 @@ export const Sidebar = ({
           )}>
           🎬
         </div>
-        <span className={cn('text-sm font-bold tracking-tight', text)}>Vidsy</span>
+        <span className={cn('text-sm font-bold tracking-tight', text)}>UUGet</span>
       </div>
 
       {/* Nav */}

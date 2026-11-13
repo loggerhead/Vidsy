@@ -1,0 +1,29 @@
+{
+  "date": "2026-11-12",
+  "repository": "/Users/bytedance/my-projects/Vidsy",
+  "node": "v24.10.0",
+  "pnpm": "10.11.0",
+  "git_head": "429ba87e2458d1c7f66c400761f5e22656ea0e98",
+  "extension_version": "1.1.0",
+  "browser_profiles": "isolated temporary unpacked-extension profiles; user profiles untouched",
+  "external_live_account_suite": "not enabled; four opt-in cases skipped",
+  "physical_host_sleep": "not invoked",
+  "physical_cellular_transition": "not invoked; event contract and manual settings tested",
+  "subagents": "none",
+  "commit_push_version_change": "none",
+  "finalized_at_utc": "2026-11-12T08:45:46.017891+00:00",
+  "final_results": {
+    "core_passed": 202,
+    "workspace_passed": 48,
+    "orchestration_passed": 9,
+    "browser_passed": 97,
+    "browser_failed": 0,
+    "browser_external_optins_skipped": 4,
+    "browser_test_files_passed": 19,
+    "type_check_packages_passed": 17,
+    "production_build": "passed",
+    "relevant_lint": "passed",
+    "patch_check": "passed",
+    "status": "M0-M5 and global acceptance complete"
+  }
+}

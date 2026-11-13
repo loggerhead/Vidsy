@@ -56,6 +56,15 @@ type MediaDownloadStage =
   | 'cancelled'
   | 'paused';
 type MediaDownloadProgress = {
+  schemaVersion?: 1;
+  cacheExpiresAt?: number;
+  resumeNotice?: string;
+  cachedBytes?: number;
+  resumeFromBytes?: number;
+  nextRangeOffset?: number;
+  remainingDownloadBytes?: number;
+  resumeCapability?: 'segments' | 'none' | 'range' | 'restart' | 'complete-input' | 'artifact';
+  validationMethod?: 'etag' | 'last-modified' | 'boundary-sample' | 'manifest' | 'local-checksums' | 'mixed';
   key: string;
   stage: MediaDownloadStage;
   downloadedBytes: number;
@@ -94,6 +103,10 @@ type MediaHistoryItem = MediaItem & {
 type MediaDetectionState = Record<string, MediaItem[]>;
 type MediaHistoryState = MediaHistoryItem[];
 type MediaSettings = {
+  pauseOnMeteredNetwork?: boolean;
+  manuallyMetered?: boolean;
+  cacheRetentionDays?: number;
+  cacheMaxBytes?: number;
   enableHlsMerging: boolean;
   maxHistory: number;
   filenameTemplate: string;
@@ -102,7 +115,7 @@ type MediaSettings = {
   // degrades both. Users with headroom can bump this from the options page.
   downloadConcurrency: number;
   // Intercept browser-initiated video/audio downloads and offer to handle them
-  // through Vidsy. Default ON — the modal lets the user choose "Open in
+  // through UUGet. Default ON — the modal lets the user choose "Open in
   // Browser" per-download, and there's a settings toggle to disable entirely.
   enableDownloadInterceptor: boolean;
   // Number of parallel HTTP Range connections per single download. Default 8.
@@ -123,6 +136,8 @@ type MediaSettings = {
 };
 
 const DEFAULT_MEDIA_SETTINGS: MediaSettings = {
+  pauseOnMeteredNetwork: true,
+  manuallyMetered: false,
   enableHlsMerging: true,
   maxHistory: 30,
   filenameTemplate: '',
@@ -157,7 +172,7 @@ export const mediaDownloadsStorage = createStorage<MediaDownloadState>(
   'media-downloads',
   {},
   {
-    storageEnum: StorageEnum.Session,
+    storageEnum: StorageEnum.Local,
     liveUpdate: true,
     sessionAccessForContentScripts: true,
   },

@@ -17,6 +17,7 @@ let holdResume = true;
 let holdDetails = true;
 let holdMerged = true;
 let requireDashAuth = false;
+let allowFailedBlock = false;
 const activeJobs = new Map<string, number>();
 let maxActiveJobs = 0;
 const crossOriginAuth: (string | undefined)[] = [];
@@ -92,6 +93,7 @@ describe('durable download pipeline', () => {
           return;
         }
         const large = [
+          '/failed-block.mp4',
           '/resume.mp4',
           '/restart.mp4',
           '/cancel.mp4',
@@ -148,6 +150,11 @@ describe('durable download pipeline', () => {
         if ((path === '/ignored.mp4' && range?.[2] !== '0') || path === '/hls-ranges-ignored.mp4') range = undefined;
         const start = range ? Number(range[1]) : 0;
         const end = range ? Math.min(range[2] ? Number(range[2]) : data.length - 1, data.length - 1) : data.length - 1;
+        if (path === '/failed-block.mp4' && start > 0 && !allowFailedBlock) {
+          response.writeHead(403);
+          response.end();
+          return;
+        }
         response.writeHead(range ? 206 : 200, {
           'content-type': mime,
           'accept-ranges': 'bytes',
@@ -203,13 +210,13 @@ describe('durable download pipeline', () => {
     await startBrowser();
   }, 90_000);
   afterEach(async () => {
-    // A failed assertion must not leave a gated source occupying the next test's slots.
+    // End each fixture independently, including retained failed deliveries that could match a later URL.
     await withNewPage(async page => {
       await page.goto(extensionUrl('popup.html'));
       await page.evaluate(async () => {
-        const runtime = (await chrome.storage.session.get('vidsy-download-runtime'))['vidsy-download-runtime'];
+        const runtime = (await chrome.storage.local.get('vidsy-download-runtime'))['vidsy-download-runtime'];
         for (const job of Object.values(runtime?.jobs ?? {}) as { requestId: string; state: string }[]) {
-          if (!['succeeded', 'failed', 'cancelled'].includes(job.state))
+          if (!['succeeded', 'cancelled'].includes(job.state))
             await chrome.runtime.sendMessage({
               type: 'media/cancel',
               payload: { key: job.requestId, intent: 'cancel' },
@@ -265,7 +272,7 @@ describe('durable download pipeline', () => {
         .poll(
           async () =>
             extensionWorker().evaluate(async key => {
-              const progress = (await chrome.storage.session.get('media-downloads'))['media-downloads']?.[key];
+              const progress = (await chrome.storage.local.get('media-downloads'))['media-downloads']?.[key];
               if (progress?.stage === 'failed') throw new Error(progress.error);
               return progress?.stage;
             }, key),
@@ -273,7 +280,7 @@ describe('durable download pipeline', () => {
         )
         .toBe('success');
       const progress = await extensionWorker().evaluate(
-        async key => (await chrome.storage.session.get('media-downloads'))['media-downloads'][key],
+        async key => (await chrome.storage.local.get('media-downloads'))['media-downloads'][key],
         key,
       );
       expect(progress.item.title).toBe(`Fixture ${scenario.name}`);
@@ -349,7 +356,7 @@ describe('durable download pipeline', () => {
     });
   const progress = (key: string) =>
     extensionWorker().evaluate(
-      async key => (await chrome.storage.session.get('media-downloads'))['media-downloads']?.[key],
+      async key => (await chrome.storage.local.get('media-downloads'))['media-downloads']?.[key],
       key,
     );
   const control = async (key: string, type: string, intent: string) =>
@@ -364,7 +371,7 @@ describe('durable download pipeline', () => {
   const uiControl = async (key: string, intent: 'Pause' | 'Resume' | 'Retry', path = 'popup.html') =>
     withNewPage(async page => {
       await page.goto(extensionUrl(path));
-      await page.getByTitle('Downloads', { exact: true }).click();
+      if (path === 'side-panel.html') await page.getByTitle('Downloads', { exact: true }).click();
       const row = page.locator('div.group').filter({ has: page.getByTitle(`Control ${key}`, { exact: true }) });
       if (intent === 'Pause') await row.getByTitle('Pause (remembers intent to resume)').click();
       else await row.getByRole('button', { name: intent, exact: true }).click();
@@ -414,7 +421,7 @@ describe('durable download pipeline', () => {
         .poll(() => extensionWorker().evaluate(async () => Boolean(await chrome.alarms.get('vidsy-download-recovery'))))
         .toBe(true);
       const state = await extensionWorker().evaluate(async key => {
-        const data = (await chrome.storage.session.get('vidsy-download-runtime'))['vidsy-download-runtime'];
+        const data = (await chrome.storage.local.get('vidsy-download-runtime'))['vidsy-download-runtime'];
         return Object.values(data.jobs).find((job: unknown) => (job as { requestId: string }).requestId === key) as {
           state: string;
           attempt: number;
@@ -427,7 +434,7 @@ describe('durable download pipeline', () => {
       });
       await expectStage(key, 'success');
       const attempt = await extensionWorker().evaluate(async key => {
-        const data = (await chrome.storage.session.get('vidsy-download-runtime'))['vidsy-download-runtime'];
+        const data = (await chrome.storage.local.get('vidsy-download-runtime'))['vidsy-download-runtime'];
         return (
           Object.values(data.jobs).find((job: unknown) => (job as { requestId: string }).requestId === key) as {
             attempt: number;
@@ -520,6 +527,60 @@ describe('durable download pipeline', () => {
     await removeOutput(key);
   });
 
+  it('persistent 403 at 50% retries only missing ranges and preserves visible progress', async () => {
+    await extensionWorker().evaluate(async () =>
+      chrome.storage.local.set({ 'media-settings': { downloadConcurrency: 1, downloadConnectionsPerFile: 1 } }),
+    );
+    const key = crypto.randomUUID();
+    await submit(key, '/failed-block.mp4');
+    await expectStage(key, 'failed');
+    const failed = await progress(key);
+    expect(
+      failed.chunks,
+      JSON.stringify({
+        failed,
+        requests: rangeCalls.get('/failed-block.mp4'),
+        transports: transports.get('/failed-block.mp4'),
+      }),
+    ).toBeDefined();
+    const completed = failed.chunks.filter((chunk: { status: string }) => chunk.status === 'done');
+    expect(completed).toHaveLength(1);
+    expect(failed.downloadedBytes / failed.estimatedBytes).toBeCloseTo(0.5, 2);
+    expect(failed.error).toContain('retained');
+    allowFailedBlock = true;
+    await withNewPage(async page => {
+      await page.goto(extensionUrl('popup.html'));
+      await page.evaluate(key => {
+        Reflect.set(globalThis, '__retryBytes', []);
+        chrome.storage.local.onChanged.addListener(changes => {
+          const entry = changes['media-downloads']?.newValue?.[key];
+          if (entry && ['queued', 'init', 'download-video', 'download-audio'].includes(entry.stage))
+            Reflect.get(globalThis, '__retryBytes').push(entry.downloadedBytes);
+        });
+      }, key);
+      await uiControl(key, 'Retry');
+      await expectStage(key, 'success');
+      const bytes = await page.evaluate(() => Reflect.get(globalThis, '__retryBytes'));
+      expect(bytes.length).toBeGreaterThan(0);
+      expect(Math.min(...bytes)).toBeGreaterThanOrEqual(failed.downloadedBytes);
+    });
+    for (const chunk of completed)
+      expect(
+        rangeCalls.get('/failed-block.mp4')!.filter(range => range === `bytes=${chunk.start}-${chunk.end}`),
+      ).toHaveLength(1);
+    const [download] = await extensionWorker().evaluate(
+      async id => chrome.downloads.search({ id }),
+      (await progress(key)).downloadId,
+    );
+    const free = Buffer.alloc(6 * 1024 * 1024);
+    free.writeUInt32BE(free.length, 0);
+    free.write('free', 4);
+    expect(await readFile(download.filename)).toEqual(
+      Buffer.concat([await readFile(resolve(fixtureRoot, 'direct.mp4')), free]),
+    );
+    await removeOutput(key);
+  });
+
   it('a failed request can retry, and a fresh request can download the same URL again', async () => {
     const key = crypto.randomUUID();
     await submit(key, '/flaky.mp4');
@@ -601,7 +662,7 @@ describe('durable download pipeline', () => {
     await expectStage(key, 'success');
     const job = await extensionWorker().evaluate(
       async key =>
-        Object.values((await chrome.storage.session.get('vidsy-download-runtime'))['vidsy-download-runtime'].jobs).find(
+        Object.values((await chrome.storage.local.get('vidsy-download-runtime'))['vidsy-download-runtime'].jobs).find(
           (job: unknown) => (job as { requestId: string }).requestId === key,
         ) as { attempt: number },
       key,
@@ -681,22 +742,15 @@ describe('durable download pipeline', () => {
     expect(maxActiveJobs).toBe(2);
   });
 
-  it('falls back safely when a server ignores a Range request', async () => {
+  it('reports integrity failure and discards cached input when a server ignores a Range request', async () => {
     const key = crypto.randomUUID();
     await submit(key, '/ignored.mp4');
-    await expectStage(key, 'success');
+    await expectStage(key, 'failed');
     const item = await progress(key);
-    expect(item.transferMode).toBe('stream');
-    expect(item.fallbackReason).toContain('Invalid Range');
-    expect(transports.get('/ignored.mp4')!.filter(value => value === 'full')).toHaveLength(1);
-    const [download] = await extensionWorker().evaluate(async id => chrome.downloads.search({ id }), item.downloadId);
-    const free = Buffer.alloc(6 * 1024 * 1024);
-    free.writeUInt32BE(free.length, 0);
-    free.write('free', 4);
-    expect(await readFile(download.filename)).toEqual(
-      Buffer.concat([await readFile(resolve(fixtureRoot, 'direct.mp4')), free]),
-    );
-    await unlink(download.filename);
+    expect(item.error).toContain('Integrity check failed');
+    expect(item.error).toContain('Invalid Range');
+    expect(transports.get('/ignored.mp4')!.filter(value => value === 'full')).toHaveLength(0);
+    expect(item.downloadId).toBeUndefined();
   });
 
   it('does not forward source credentials to a cross-origin HLS rendition', async () => {
@@ -816,14 +870,18 @@ describe('durable download pipeline', () => {
     const [download] = await extensionWorker().evaluate(async id => chrome.downloads.search({ id }), downloadId);
     if (download?.filename) await unlink(download.filename).catch(() => undefined);
     const next = crypto.randomUUID();
-    await submit(next, '/direct.mp4');
+    // The same URL now intentionally reuses the retained failed-delivery task.
+    // An independent resource proves that the failed native copy released its slot.
+    await submit(next, '/separate-video.mp4');
     await expectStage(next, 'success');
     await removeOutput(next);
   });
 
   it('clears terminal task records without blocking the next download', async () => {
     const key = crypto.randomUUID();
-    await submit(key, '/direct.mp4');
+    // Isolate this resource from retained failed deliveries in earlier cases.
+    const path = `/direct.mp4?clear=${key}`;
+    await submit(key, path);
     await expectStage(key, 'success');
     const before = (await progress(key)).downloadId;
     await removeOutput(key);
@@ -838,13 +896,13 @@ describe('durable download pipeline', () => {
     expect(
       await extensionWorker().evaluate(
         async key =>
-          Object.values(
-            (await chrome.storage.session.get('vidsy-download-runtime'))['vidsy-download-runtime'].jobs,
-          ).some((job: unknown) => (job as { requestId: string }).requestId === key),
+          Object.values((await chrome.storage.local.get('vidsy-download-runtime'))['vidsy-download-runtime'].jobs).some(
+            (job: unknown) => (job as { requestId: string }).requestId === key,
+          ),
         key,
       ),
     ).toBe(false);
-    await submit(key, '/direct.mp4');
+    await submit(key, path);
     await expectStage(key, 'success');
     expect((await progress(key)).downloadId).not.toBe(before);
     await removeOutput(key);
@@ -937,7 +995,7 @@ describe('durable download pipeline', () => {
   it('popup, side panel and options clear history through the background writer', async () => {
     for (const path of ['popup.html', 'side-panel.html', 'options.html']) {
       const key = crypto.randomUUID();
-      await submit(key, '/direct.mp4');
+      await submit(key, `/direct.mp4?history=${key}`);
       await expectStage(key, 'success');
       await removeOutput(key);
       await withNewPage(async page => {

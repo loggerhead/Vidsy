@@ -1,0 +1,16 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m4-http.test.ts -t 'expired request headers|expired signed URL'
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m4-http.test.ts (14 tests | 12 skipped) 21973ms
+   ✓ expired signed URL is reparsed once and verified cached ranges survive the new URL 12295ms
+   ✓ expired request headers are refreshed once and retain verified byte ranges on the same URL 8000ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 12 skipped (14)
+   Start at  14:30:33
+   Duration  22.57s (tests 98%, import 2%)
+

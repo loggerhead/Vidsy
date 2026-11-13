@@ -1,7 +1,14 @@
+import { DownloadFailure } from './download-failure';
 import { flowLog, errorInfo } from './download-log';
 import { headersForFetch, scopeHeaders } from './fetch-headers';
 import { parseHlsMaster } from './m3u8-parser';
-import { HttpRequestError, openDownloadResponse, retryableRequest } from './network-request';
+import {
+  HttpRequestError,
+  openDownloadResponse,
+  retryableRequest,
+  automaticallyRecoverable,
+  waitForRetry,
+} from './network-request';
 
 type ResolvedPlaylist = { url: string; manifestText: string; audio?: ResolvedPlaylist };
 
@@ -68,9 +75,14 @@ const fetchResolvedHlsPlaylist = async (
         /Refresh the video page|exceeds 8 MiB/.test(String(reason))
       )
         throw reason instanceof HttpRequestError
-          ? new Error(`Failed to fetch HLS playlist: ${reason.status} ${reason.url}`)
+          ? new DownloadFailure(
+              'transport',
+              `Failed to fetch HLS playlist: ${reason.status} ${reason.url}`,
+              undefined,
+              automaticallyRecoverable(reason),
+            )
           : reason;
-      await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
+      await waitForRetry(500 * 2 ** attempt, options.signal ?? new AbortController().signal);
     } finally {
       request?.dispose();
     }

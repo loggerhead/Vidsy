@@ -31,3 +31,40 @@ test('range probe cancels a full response without buffering its body', async () 
     globalThis.fetch = original;
   }
 });
+
+test('retained strong-validator checkpoints use HEAD and expose changed identity without downloading cached media', async () => {
+  const original = fetch;
+  const methods: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    methods.push(init?.method ?? 'GET');
+    return new Response(null, { headers: { etag: '"new"', 'content-length': '8', 'content-type': 'video/mp4' } });
+  };
+  try {
+    const probe = await probeRangeSupport('https://fixture/video', new AbortController().signal, undefined, {
+      url: 'https://fixture/video',
+      resourceVersion: '"old"',
+      totalBytes: 8,
+    });
+    assert.equal(probe.resourceVersion, '"new"');
+    assert.deepEqual(methods, ['HEAD']);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('HTTP failure during checkpoint validation does not become a streaming fallback', async () => {
+  const original = fetch;
+  globalThis.fetch = async () => new Response(null, { status: 403 });
+  try {
+    await assert.rejects(
+      probeRangeSupport('https://fixture/video', new AbortController().signal, undefined, {
+        url: 'https://fixture/video',
+        resourceVersion: '"old"',
+        totalBytes: 8,
+      }),
+      /403/,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});

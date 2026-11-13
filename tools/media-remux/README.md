@@ -20,7 +20,7 @@ it does not measure sustained large-file throughput or replay an authenticated
 live source.
 
 The Bilibili diagnostic launches a fresh Chrome profile, loads the current WXT
-unpacked output from `.output/chrome-mv3`, attaches to the page and Vidsy service worker, and writes a JSONL
+unpacked output from `.output/chrome-mv3`, attaches to the page and UUGet service worker, and writes a JSONL
 trace containing page state, console errors, network requests, detections,
 download progress, and the final Chrome download record.
 Set `VIDSY_EXTENSION_DIR` only when intentionally validating another unpacked

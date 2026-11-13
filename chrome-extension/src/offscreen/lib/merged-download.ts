@@ -1,5 +1,6 @@
+import { cacheCommand } from './cache-client';
 import { errorInfo, flowLog, safeUrl } from './download-log';
-import { downloadUrlToOpfs } from './http-download';
+import { downloadUrlToOpfs, discardCompletedHttpInput } from './http-download';
 import { jsfetchInputForOpfs, preflightDiskSpace } from './libav-mux';
 import { describeDirectFile, mergeTrackDescriptors } from './media-descriptor';
 import { executeMuxPlan, requireExecutablePlan } from './media-executor';
@@ -7,9 +8,11 @@ import { planMediaProcessing } from './media-processing';
 import { opfsJobName } from './opfs-job-name';
 import { prepareOutputDelivery } from './output-delivery';
 import { updateProgress } from './progress';
+import { probeRangeSupport } from './range-probe';
 import { activeAbortControllers, downloadStopIntents } from './segment-fetcher';
 import { cancelWorkerJob, getOpfsFile, readMaxConnections, removeOpfs } from './worker-client';
 import type { DownloadTransport } from './http-download';
+import type { RangeProbe } from './range-probe';
 import type { ProgressUpdate } from '../download_worker/messages';
 
 type TrackProgress = {
@@ -18,6 +21,7 @@ type TrackProgress = {
   activeConnections: number;
   transport?: DownloadTransport;
   done: boolean;
+  resumeNotice?: string;
 };
 
 const activeConnectionsFor = (progress: ProgressUpdate): number =>
@@ -38,6 +42,8 @@ export const downloadMerged = async (
   audioMimeType: string | undefined,
   key: string,
   headers?: Record<string, string>,
+  revalidateCompleted = false,
+  audioHeaders?: Record<string, string>,
 ): ReturnType<typeof prepareOutputDelivery> => {
   flowLog('merged.start', {
     videoUrl: safeUrl(videoUrl),
@@ -76,6 +82,8 @@ export const downloadMerged = async (
       );
       const modes = new Set(transports.map(transport => transport.mode));
       const transferMode = modes.size > 1 ? 'mixed' : modes.values().next().value;
+      const methods = new Set(transports.map(transport => transport.validationMethod).filter(Boolean));
+      const validationMethod = methods.size > 1 ? ('mixed' as const) : [...methods][0];
       const fallbackReason = transports
         .map(transport => transport.fallbackReason)
         .filter((reason): reason is string => !!reason)
@@ -88,9 +96,16 @@ export const downloadMerged = async (
           estimatedBytes,
           chunks: [],
           transferMode,
+          validationMethod,
+          resumeCapability: transports.some(transport => transport.mode === 'stream')
+            ? 'restart'
+            : transports.length === 2
+              ? 'range'
+              : undefined,
           activeConnections: tracks.video.activeConnections + tracks.audio.activeConnections,
           connectionLimit: totalConnectionBudget,
           fallbackReason: fallbackReason || undefined,
+          resumeNotice: [tracks.video.resumeNotice, tracks.audio.resumeNotice].filter(Boolean).join('; ') || undefined,
         }),
       );
       return progressWrite;
@@ -100,6 +115,7 @@ export const downloadMerged = async (
       (track: 'video' | 'audio') =>
       (progress: ProgressUpdate): void => {
         tracks[track].downloadedBytes = progress.downloadedBytes;
+        if (progress.resumeNotice) tracks[track].resumeNotice = progress.resumeNotice;
         tracks[track].estimatedBytes = progress.estimatedBytes;
         tracks[track].activeConnections = activeConnectionsFor(progress);
         void publishCombinedProgress();
@@ -120,9 +136,41 @@ export const downloadMerged = async (
       connectionLimit: totalConnectionBudget,
     });
 
+    const probes: Partial<Record<'video' | 'audio', RangeProbe>> = {};
+    const preflightTrack = async (track: 'video' | 'audio', url: string, name: string, connections: number) => {
+      const { record } = await cacheCommand({ operation: 'read', name });
+      if (record?.complete && record.httpMetadata && !revalidateCompleted) {
+        await transportFor(track)(record.httpMetadata.transport);
+        return;
+      }
+      const probe = await probeRangeSupport(
+        url,
+        abortController.signal,
+        track === 'audio' ? (audioHeaders ?? headers) : headers,
+        record?.ranges?.source,
+      );
+      probes[track] = probe;
+      const mode =
+        probe.supportsRange && probe.totalBytes && probe.totalBytes > 0 ? ('range' as const) : ('stream' as const);
+      await transportFor(track)({
+        mode,
+        connectionLimit: mode === 'range' ? connections : 1,
+        totalBytes: probe.totalBytes,
+        validationMethod: probe.validationMethod,
+        fallbackReason: mode === 'stream' ? 'This track has no byte-offset resume; it restarts on Retry' : undefined,
+      });
+    };
+    await preflightTrack('video', videoUrl, videoOpfsName, videoConnections);
+    await preflightTrack('audio', audioUrl, audioOpfsName, audioConnections);
+    tracks.video.activeConnections = 0;
+    tracks.audio.activeConnections = 0;
+    await publishCombinedProgress();
+
     const downloadVideo = async () => {
       const result = await downloadUrlToOpfs({
         url: videoUrl,
+        preflightProbe: probes.video,
+        revalidateCompleted,
         jobKey: key,
         opfsName: videoOpfsName,
         stage: 'download-video',
@@ -148,11 +196,13 @@ export const downloadMerged = async (
     const downloadAudio = async () => {
       const result = await downloadUrlToOpfs({
         url: audioUrl,
+        preflightProbe: probes.audio,
+        revalidateCompleted,
         jobKey: key,
         opfsName: audioOpfsName,
         stage: 'download-audio',
         signal: abortController.signal,
-        headers,
+        headers: audioHeaders ?? headers,
         maxConnections: audioConnections,
         reportProgress: false,
         onProgress: progressFor('audio'),
@@ -208,6 +258,13 @@ export const downloadMerged = async (
 
     await progressWrite;
     const totalInputBytes = videoDownload.totalBytes + audioDownload.totalBytes;
+    await updateProgress(key, {
+      stage: 'mux',
+      downloadedBytes: totalInputBytes,
+      estimatedBytes: totalInputBytes,
+      resumeCapability: 'complete-input',
+      validationMethod: 'local-checksums',
+    });
     const descriptor = mergeTrackDescriptors([
       await describeDirectFile(videoDownload.file, 'separate-tracks', videoMimeType),
       await describeDirectFile(audioDownload.file, 'separate-tracks', audioMimeType),
@@ -237,11 +294,16 @@ export const downloadMerged = async (
     URL.revokeObjectURL(audioBlobUrl);
     videoBlobUrl = null;
     audioBlobUrl = null;
-    await removeOpfs(videoOpfsName).catch(() => undefined);
-    await removeOpfs(audioOpfsName).catch(() => undefined);
-
     const outputFile = await getOpfsFile(outputOpfsName);
-    const delivery = await prepareOutputDelivery({ jobKey: key, file: outputFile, opfsName: outputOpfsName, plan });
+    const delivery = await prepareOutputDelivery({
+      signal: abortController.signal,
+      jobKey: key,
+      file: outputFile,
+      opfsName: outputOpfsName,
+      plan,
+    });
+    await discardCompletedHttpInput(videoOpfsName).catch(() => undefined);
+    await discardCompletedHttpInput(audioOpfsName).catch(() => undefined);
     flowLog('merged.done', { outputBytes: delivery.artifact.size, output: plan.output });
     return delivery;
   } catch (err) {
@@ -260,9 +322,9 @@ export const downloadMerged = async (
         /* ignore */
       }
     }
-    if (downloadStopIntents.get(key) !== 'pause') {
-      await removeOpfs(videoOpfsName).catch(() => undefined);
-      await removeOpfs(audioOpfsName).catch(() => undefined);
+    if (downloadStopIntents.get(key) === 'cancel') {
+      await discardCompletedHttpInput(videoOpfsName).catch(() => undefined);
+      await discardCompletedHttpInput(audioOpfsName).catch(() => undefined);
     }
     if (outputOpfsName) await removeOpfs(outputOpfsName).catch(() => undefined);
     throw err;
@@ -275,5 +337,7 @@ export const downloadMerged = async (
 };
 
 export const discardMergedResume = async (key: string): Promise<void> => {
-  await Promise.all(['video', 'audio'].map(async tag => removeOpfs(await opfsJobName('merged', key, tag, '.bin'))));
+  await Promise.all(
+    ['video', 'audio'].map(async tag => discardCompletedHttpInput(await opfsJobName('merged', key, tag, '.bin'))),
+  );
 };

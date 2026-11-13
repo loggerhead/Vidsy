@@ -47,7 +47,7 @@ export const PasteUrlRow = ({
   return (
     <div
       className={cn(
-        'flex flex-col gap-1.5 border-b px-3 py-2.5',
+        'popup-add-link-panel flex shrink-0 flex-col gap-1.5 border-t px-3 py-2.5',
         isLight ? 'border-gray-100 bg-gray-50' : 'border-white/[0.04] bg-white/[0.02]',
       )}>
       <div className="flex items-center gap-1.5">

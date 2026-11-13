@@ -1,0 +1,23 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m5.test.ts
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m5.test.ts (9 tests) 56155ms
+   ✓ paused details distinguish visible progress from verified cache, next offset and remaining payload 1677ms
+   ✓ popup Pause all includes queued work and side-panel Resume all preserves configured concurrency 15628ms
+   ✓ settings expose cache usage, persistent-storage outcome, update existing TTL and discard only paused files 921ms
+   ✓ cancel after an interrupted executor restart cleans cache even when its execution identity was lost 1380ms
+   ✓ a paused download associated with its original page survives a complete browser restart 1408ms
+   ✓ after browser restart an exact reopened source page renews an expired URL despite a stale tab ID 8424ms
+   ✓ a reported cellular transition pauses valid cache without recovery and explicit Resume allows this connection 7567ms
+   ✓ manual metered fallback pauses active work and holds new downloads before network dispatch 8642ms
+   ✓ a non-Range source offers Stop; a batch pause explicitly resumes by downloading the whole stream again 8567ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  15:52:38
+   Duration  56.79s (tests 99%, import 1%)
+

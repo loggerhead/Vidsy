@@ -1,0 +1,6 @@
+93add9e8152f9738e5f6b9e2505d376f43e5409f35fbc2af3f38de936b701fdf  chrome-extension/src/offscreen/download_worker/main.ts
+1f8dc90de0a7dfdde222827d10d1df2b960077849ca745d583d61f4ed9fdbc95  chrome-extension/src/offscreen/download_worker/range-fetch.ts
+36eab61dffef4950d15416b18ae519e5222431852bc2d8092242d3b2310ff156  chrome-extension/src/offscreen/download_worker/segment-checkpoints.ts
+c74a5443c0566f0c44b33d7ab1a75f8753ee4e99fb45bee251e96416ef378fa3  chrome-extension/src/offscreen/download_worker/persistent-artifact.ts
+c2a6d0529a65e74f9045870bce30107ab8a65e7444695c0d1bbfa966e717b2eb  .output/chrome-mv3/download-worker.js
+b195c8a455a49ecbe5f92c844dae40e9782610c28afb152cbe2d261ad4968991  tests/e2e/specs/resume-m4-http.test.ts

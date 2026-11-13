@@ -1,6 +1,6 @@
-# Vidsy - Ultimate Video Downloader Extension
+# UUGet — Video Downloader
 
-Looking for a powerful **video downloader extension** for Chrome? **Vidsy** is a browser extension that seamlessly detects and downloads video and audio from almost any website. Whether it's standard HTTP streams or complex HLS/DASH formats, Vidsy grabs the media and remuxes it into a proper MP4/MP3 utilizing **libav.js (FFmpeg) compiled to WebAssembly**, with OPFS-backed streaming so multi-GB files mux without tab crashes.
+Looking for a powerful **video downloader extension** for Chrome? **UUGet** is a browser extension that seamlessly detects and downloads video and audio from almost any website. Whether it's standard HTTP streams or complex HLS/DASH formats, UUGet grabs the media and remuxes it into a proper MP4/MP3 utilizing **libav.js (FFmpeg) compiled to WebAssembly**, with OPFS-backed streaming so multi-GB files mux without tab crashes.
 
 > **Note from the Developer:**
 > This is my personal attempt at building a Chrome extension capable of detecting and allowing users to download media directly from the web. I know this is not perfect and hasn't been widely tested across all websites. Please feel free to create an issue if you are facing any problems—your suggestions and feedback are extremely welcome and truly matter! If you are a developer, bug fixes and feature pull requests are highly appreciated.
@@ -9,30 +9,45 @@ Built on [Chrome Extension Boilerplate with React + Vite + TypeScript](https://g
 
 ## Install
 
-### From Chrome Web Store (recommended)
+### Website
 
-Install with one click:
+[uu0uu.com](https://uu0uu.com)
 
-**[Vidsy on the Chrome Web Store](https://chromewebstore.google.com/detail/vidsy/kpaipljgcidaeajchdaignokjaggkmfh)**
+Find videos on the web. Save them in one click.
 
-Works in Chrome, Edge, Brave, and any other Chromium-based browser.
+The Chrome Web Store listing will be linked here after publication.
 
 ### Manual install (load unpacked)
 
 For early access to fixes or for development testing:
 
-1. Download the latest build zip from the [Releases page](https://github.com/SM227465/Vidsy/releases/latest), or build locally with `pnpm install && pnpm zip` (outputs `dist-zip/`).
+1. Build locally with `pnpm install && pnpm zip`. The Chrome ZIP package is generated in `.output/`.
 2. Unzip the archive somewhere stable (the extension reads files from this directory at runtime — don't delete it after loading).
 3. Open `chrome://extensions` in your browser.
 4. Toggle **Developer mode** on (top-right corner).
 5. Click **Load unpacked** and select the unzipped folder.
 
+## Download recovery (M0–M4)
+
+Failed transfers retain valid cached input. Retry validates that input before reuse; HTTP Range downloads request only missing intervals after checking durable internal checkpoints. Processing failures retain completed inputs and rerun mux or MP3 conversion without requesting media bytes. Integrity failures discard affected inputs and explain that Retry will download again. Cancel and removing a failed task release retained inputs.
+
+| Path | Current recovery semantics | Validation and limits |
+| --- | --- | --- |
+| HTTP Range, including separate audio/video | Resume from durable offsets at <=1 MiB granularity after pause, failure, browser restart, crash or reload | Strong ETag or Date If-Range + boundary samples or length + boundary samples; full cached-block hashes and strict response coordinates |
+| HLS/DASH prefetched tracks | VOD segment resume across sessions; video and audio checkpoints are independent. Changed playlists/sequence/track identity explicitly discard old parts and restart | Same manifest/track identity and full local SHA-256; Range-capable segments/init use <=1 MiB checkpoints. AES-128 checkpoints ciphertext before atomic decryption; non-Range incomplete parts retry in full |
+| HTTP stream without Range | Transfer Retry restarts the stream with an explicit reason; completed input supports processing Retry | Complete response length and local SHA-256 input verification; byte-offset resume is unavailable |
+| Mux / MP3 conversion | Retry reuses complete inputs | Full cached-input hashes and the existing output container, track and duration checks |
+| Live HLS/DASH snapshot | Stop incomplete transport; completed inputs can retry processing and completed output can be delivered again across restart | Frozen original manifest and full local hashes; incomplete live transport cannot resume |
+| Native browser save | Verified saved artifact can be delivered again after interruption and browser restart | Full-file block hashes and metadata proof before Blob publication; 24-hour output lease; native Chrome resume behavior is unchanged |
+
+Task and input checkpoints use versioned storage.local ledgers. Startup restores interrupted cached tasks as paused. Redetecting the same source can continue the original task after identity validation; popup and side panel offer Pause all and Resume all, including queued work without exceeding configured concurrency. Pause all stops incomplete live snapshots with an explicit restart reason; completed live inputs/outputs retain their processing/delivery recovery path. Cache retention defaults to 7 days (configurable in storage settings), with whole-job capacity LRU and immediate cancel cleanup. Transient network failures automatically pause and resume after reconnection or bounded backoff: five attempts at 30, 60, 120, 240 and 480 seconds, checked by durable Chrome alarms (up to one 30-second check interval later). Cached progress is retained after exhaustion; manual pause/cancel stop automatic recovery. Permanent permission, integrity and processing failures require an explicit Retry. Live playlists save a finite snapshot of the current advertised segments and expose Stop; incomplete live snapshots cannot resume. Completed live snapshot inputs support processing Retry, including after restart, using their original manifest and verified immutable inputs. Expired URL/request headers trigger one source-page reparse; failed/unsupported renewal preserves valid cache with re-detection guidance. A new HTTP alias must pass validators, local hashes and remote samples. Changed segmented identity still explicitly restarts. No-Range sources cannot meet the 1 MiB byte-retransmission bound. Download rows and details show the probed recovery capability; unknown/non-Range transfer exposes Stop or an explicit download-again action. Paused details separate verified cached bytes, the next HTTP payload offset when available, and estimated remaining payload from visible progress. Settings expose cache usage, per-task/all paused-or-failed discard and 1–365-day input TTL (default 7 days); active work remains protected. The extension explicitly requests persistent storage and reports the browser decision. A detected cellular/data-saver transition pauses work and clears automatic recovery; explicit Resume allows that task on the current connection. Chrome may not expose a reliable connection type, so settings also provide a manual metered-connection flag; effective network speed is never treated as cellular detection. Completed live outputs retain the same 24-hour delivery lease. DASH currently supports one period with SegmentTemplate or SegmentList; unsupported/unbounded layouts fail explicitly. The implementation and acceptance status are recorded in [download recovery status](docs/download-resume/STATUS.md).
+
 ## Features
 
-- **Browser download interceptor** *(new in 1.1.0)* — opt-in setting that catches browser-initiated video / audio downloads via `chrome.downloads.onCreated`, cancels the native flow, and offers a "Download File Info" modal with **Start Download** (route through Vidsy) / **Open in Browser** (re-issue natively) / **Cancel**. Filename is editable; large opaque-host downloads (e.g. file-host hash URLs) are recognized via a size heuristic when MIME and filename give no clue
+- **Browser download interceptor** *(new in 1.1.0)* — opt-in setting that catches browser-initiated video / audio downloads via `chrome.downloads.onCreated`, cancels the native flow, and offers a "Download File Info" modal with **Start Download** (route through UUGet) / **Open in Browser** (re-issue natively) / **Cancel**. Filename is editable; large opaque-host downloads (e.g. file-host hash URLs) are recognized via a size heuristic when MIME and filename give no clue
 - **Standalone progress window** *(new in 1.1.0)* — one per intercepted download, opened as a chrome-less popup window so it survives main-browser minimize. Shows filename, source host, status, file size, downloaded / %, transfer rate, time left, resume capability, a big progress bar, and a collapsible per-connection breakdown
 - **Live per-connection breakdown** *(new in 1.1.0)* — the position bar splits each in-flight HTTP Range chunk into a faint extent + a vivid foreground that fills as bytes arrive, and a connections table shows live `downloaded / size` per slot. Padded to a stable 8-row floor so the accordion doesn't jitter as slots cycle
-- **Byte-level resume for HTTP range downloads** *(new in 1.1.0)* — pause preserves the OPFS file and chunk-completion state; resume skips chunks already on disk and continues with only the missing ones. Works within a browser session (the offscreen-doc startup GC purges OPFS on browser restart, falling back cleanly to a full restart)
+- **Byte-level resume for HTTP range downloads** *(new in 1.1.0)* — pause preserves the OPFS file and chunk-completion state; resume skips chunks already on disk and continues with only the missing ones. Persists across browser restart, crash and extension reload; startup GC retains verified checkpoints within their lease
 - **User-tunable connections-per-file** *(new in 1.1.0)* — Options → "Connections per file" controls how many parallel HTTP Range requests are used for a single download. Range 1-16, default 8
 - **Auto-close standalone window** *(new in 1.1.0)* — opt-in checkbox on the Complete view; window self-closes 3 seconds after the download succeeds
 - **System theme on first run** *(new in 1.1.0)* — extension UI defaults to your OS `prefers-color-scheme` instead of always starting light; manual toggle still wins after that
@@ -70,7 +85,7 @@ For early access to fixes or for development testing:
 | WebM stream-copy | WebM with VP9 + optional Opus | WebM | Container and tracks remain WebM-compatible |
 | Subtitles | WebVTT / SRT / TTML | SRT | Converted on save |
 
-DRM-protected streams are detected pre-dispatch and rejected with a user-visible message — Vidsy does not attempt decryption of protected content.
+DRM-protected streams are detected pre-dispatch and rejected with a user-visible message — UUGet does not attempt decryption of protected content.
 Video is never transcoded. Vorbis and codec/container combinations not listed above are rejected unless a future release adds matching fixtures, planner assertions, and end-to-end validation.
 
 ## Architecture
@@ -207,4 +222,4 @@ Open issues for feature requests or site-compatibility bugs — include the page
 
 ## Feedback
 
-Found a site where Vidsy doesn't detect media? Found a download that fails? Open an issue with reproduction steps — feedback from real-world sites is the most useful thing you can contribute.
+Found a site where UUGet doesn't detect media? Found a download that fails? Open an issue with reproduction steps — feedback from real-world sites is the most useful thing you can contribute.

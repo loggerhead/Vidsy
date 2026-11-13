@@ -1,0 +1,184 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m2.test.ts (5 tests) 142647ms
+   ✓ 30 seconds offline automatically pauses and reconnects without repeating completed media intervals 39168ms
+   ✓ cancel while waiting for automatic recovery stops future alarms and deletes cache 32686ms
+   ✓ persistent 403 stays failed and preserves progress without automatic retries 471ms
+   ✓ disconnecting during the final retry leaves a recoverable failure with cached bytes 680ms
+   ✓ a persistent recovery alarm restarts a suspended background and continues cached bytes 68232ms
+ ❯ specs/download-pipeline.test.ts (24 tests | 1 failed) 83791ms
+   ❯ durable download pipeline (24)
+     ✓ downloads and validates HTTP through the production queue 825ms
+     ✓ downloads and validates HLS through the production queue 306ms
+     ✓ downloads and validates DASH through the production queue 478ms
+     ✓ downloads and validates separate audio/video through the production queue 282ms
+     ✓ assembles a single-resource HLS playlist using exact byte ranges 462ms
+     ✓ rejects an ignored HLS initialization range 224ms
+     ✓ rechecks an unknown start outcome after both start and inventory transport failures 451ms
+     ✓ pause and resume preserve completed byte ranges 4362ms
+     ✓ resumes separate video and audio without refetching completed track ranges 3329ms
+     ✓ persistent 403 at 50% retries only missing ranges and preserves visible progress 10800ms
+     ✓ a failed request can retry, and a fresh request can download the same URL again 1560ms
+     ✓ cancels queued work before network dispatch and removes cancelled partial files 1022ms
+     ✓ reattaches to a running offscreen execution after the background stops 2476ms
+     ✓ isolates captured credentials for concurrent requests on the same CDN 5186ms
+     ✓ limits actual concurrent public downloads to the configured two jobs 4174ms
+     ✓ reports integrity failure and discards cached input when a server ignores a Range request 352ms
+     ✓ does not forward source credentials to a cross-origin HLS rendition 694ms
+     ✓ pauses during delayed browser acceptance and resumes from the retained artifact 2731ms
+     ✓ releases a finalizing task when its browser download record is missing 600ms
+     × clears terminal task records without blocking the next download 30175ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash/manifest.mpd 793ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash-layout/manifest.mpd 794ms
+     ✓ standalone controls resume the same task and create a fresh identity after cancellation 7844ms
+     ✓ popup, side panel and options clear history through the background writer 2911ms
+ ✓ specs/resume-m4-http.test.ts (14 tests) 108098ms
+   ✓ /date.mp4 resumes verified weak-source cache after browser restart 10144ms
+   ✓ /weak-date.mp4 resumes verified weak-source cache after browser restart 9446ms
+   ✓ /none.mp4 resumes verified weak-source cache after browser restart 9227ms
+   ✓ an interrupted large Range resumes inside its chunk with at most 1 MiB lost payload 9782ms
+   ✓ validator-free boundary mismatch explicitly discards old bytes and delivers the new complete file 8462ms
+   ✓ mutating an interior cached byte is detected before resume and triggers an explained full restart 8875ms
+   ✓ an interrupted native delivery survives browser restart and is delivered without a media request 9393ms
+   ✓ expired signed URL is reparsed once and verified cached ranges survive the new URL 8565ms
+   ✓ 410 without an available source page preserves progress and explains how to re-detect 916ms
+   ✓ a renewed URL that still returns 403 stops after one reparse and retains its checkpoints 984ms
+   ✓ expired request headers are refreshed once and retain verified byte ranges on the same URL 8606ms
+   ✓ cancel after restart deletes the saved output and its entire input family 1787ms
+   ✓ saved output mutation fails before native publication; another Retry downloads a validated replacement 9815ms
+   ✓ expired output metadata is removed without extending or deleting the shared input lease 10884ms
+ ✓ specs/resume-m5.test.ts (9 tests) 61346ms
+   ✓ paused details distinguish visible progress from verified cache, next offset and remaining payload 1498ms
+   ✓ popup Pause all includes queued work and side-panel Resume all preserves configured concurrency 16803ms
+   ✓ settings expose cache usage, persistent-storage outcome, update existing TTL and discard only paused files 886ms
+   ✓ cancel after an interrupted executor restart cleans cache even when its execution identity was lost 1693ms
+   ✓ a paused download associated with its original page survives a complete browser restart 1678ms
+   ✓ after browser restart an exact reopened source page renews an expired URL despite a stale tab ID 9672ms
+   ✓ a reported cellular transition pauses valid cache without recovery and explicit Resume allows this connection 9327ms
+   ✓ manual metered fallback pauses active work and holds new downloads before network dispatch 9058ms
+   ✓ a non-Range source offers Stop; a batch pause explicitly resumes by downloading the whole stream again 9776ms
+ ✓ specs/resume-m1.test.ts (7 tests) 40465ms
+   ✓ browser restart restores a paused half-file and Resume all requests only missing media intervals 9019ms
+   ✓ an abrupt browser crash restores an interrupted task as paused from its durable checkpoint 8901ms
+   ✓ extension reload restores retained checkpoints before continuing the same task 9374ms
+   ✓ redetection matches the retained content fingerprint and continues its original task identity 7848ms
+   ✓ TTL removes expired partial files and checkpoints while leaving an actionable reason 809ms
+   ✓ capacity LRU removes the oldest paused input set and preserves the newer checkpoint 1482ms
+   ✓ cancel after a browser restart immediately removes retained files and the checkpoint ledger 2019ms
+ ✓ specs/resume-m3.test.ts (16 tests) 31298ms
+   ✓ M5 hls completed live output pauses and survives restart for local delivery 2658ms
+   ✓ M4 hls expired manifest preserves cached parts and provides re-detection guidance 586ms
+   ✓ M4 hls large segment resumes within the segment after browser restart 3509ms
+   ✓ hls VOD cross-session resume only fetches missing segments 1761ms
+   ✓ hls retains complete video and resumes only unfinished audio 2181ms
+   ✓ hls manifest/sequence drift explicitly restarts instead of splicing old segments 871ms
+   ✓ hls live snapshot exposes Stop and never promises Resume 840ms
+   ✓ M5 dash completed live output pauses and survives restart for local delivery 1795ms
+   ✓ M4 dash expired manifest preserves cached parts and provides re-detection guidance 610ms
+   ✓ M4 dash large segment resumes within the segment after browser restart 3664ms
+   ✓ dash VOD cross-session resume only fetches missing segments 1932ms
+   ✓ dash retains complete video and resumes only unfinished audio 1889ms
+   ✓ dash manifest/sequence drift explicitly restarts instead of splicing old segments 1147ms
+   ✓ dash live snapshot exposes Stop and never promises Resume 989ms
+   ✓ hls completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 3060ms
+   ✓ dash completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 3071ms
+ ✓ specs/page-content-ui.test.ts (2 tests) 3110ms
+   ✓ Content UI injection (2)
+     ✓ injects all and example UI on example.com 2229ms
+ ✓ specs/resume-m0.test.ts (5 tests) 3142ms
+   ✓ real merged mux failure retains inputs; Retry performs no media requests and delivers validated tracks 543ms
+   ✓ real HTTP MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 413ms
+   ✓ real stream MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 383ms
+   ✓ real HLS mux failure retains inputs; Retry performs no media requests and delivers validated tracks 439ms
+   ✓ real DASH mux failure retains inputs; Retry performs no media requests and delivers validated tracks 665ms
+ ❯ specs/page-popup.test.ts (2 tests | 1 failed) 1065ms
+   ❯ Extension popup (2)
+     ✓ opens successfully 115ms
+     × shows current-page media, other-page downloads, and labeled toolbar actions 223ms
+ ✓ specs/download-options.test.ts (1 test) 1697ms
+   ✓ Player download options (1)
+     ✓ groups qualities, preserves selection and submits only the explicit download action 962ms
+ ✓ specs/smoke.test.ts (1 test) 2188ms
+   ✓ Example page (1)
+     ✓ loads 1475ms
+ ✓ specs/download-hover.test.ts (2 tests) 1602ms
+   ✓ Player download hover details (2)
+     ✓ shows persisted failure reasons on hover and keyboard focus 546ms
+     ✓ shows current download activity and keeps details inside a small viewport 330ms
+ ✓ specs/media-remux.test.ts (1 test) 1970ms
+   ✓ HEVC media remux (1)
+     ✓ detects HLS, shows progress, and downloads HEVC + AAC 1189ms
+ ✓ specs/page-new-tab.test.ts (1 test) 1171ms
+   ✓ Extension new tab page (1)
+     ✓ opens and switches theme 474ms
+ ✓ specs/page-content.test.ts (1 test) 2473ms
+   ✓ Content script lifecycle (1)
+     ✓ mounts the all-sites content UI and removes it on stop 1801ms
+ ✓ specs/page-options.test.ts (1 test) 1044ms
+   ✓ Extension options (1)
+     ✓ opens successfully 335ms
+ ✓ specs/page-devtools-panel.test.ts (1 test) 850ms
+ ✓ specs/page-content-runtime.test.ts (1 test) 744ms
+ ✓ specs/page-side-panel.test.ts (1 test) 836ms
+ ↓ specs/live-download-sites.test.ts (4 tests | 4 skipped)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  specs/download-pipeline.test.ts > durable download pipeline > clears terminal task records without blocking the next download
+AssertionError: expected undefined to be 'success' // Object.is equality
+
+- Expected:
+"success"
+
++ Received:
+undefined
+
+ ❯ expectStage specs/download-pipeline.test.ts:389:8
+    387|         { timeout: 30_000, interval: 30 },
+    388|       )
+    389|       .toBe(stage);
+       |        ^
+    390|   const removeOutput = async (key: string) => {
+    391|     const item = await progress(key);
+ ❯ specs/download-pipeline.test.ts:883:11
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ specs/download-pipeline.test.ts:883:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  specs/page-popup.test.ts > Extension popup > shows current-page media, other-page downloads, and labeled toolbar actions
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ specs/page-popup.test.ts:84:87
+     82|       expect(await page.getByText('Other active download', { exact: tr…
+     83|       expect(await current.getByRole('button', { name: 'Resume', exact…
+     84|       expect(await other.getByRole('button', { name: 'Pause', exact: t…
+       |                                                                                       ^
+     85|       const firstBox = await current.boundingBox();
+     86|       const secondBox = await other.boundingBox();
+ ❯ runWithAgent helpers/browser.ts:129:5
+ ❯ withPage helpers/browser.ts:113:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 17 passed | 1 skipped (20)
+      Tests  2 failed | 93 passed | 4 skipped (99)
+   Start at  15:54:56
+   Duration  499.35s (tests 98%, import 2%)
+
+/Users/bytedance/my-projects/Vidsy/tests/e2e:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @extension/e2e@1.1.0 e2e: `vitest run --config vitest.config.ts`
+Exit status 1

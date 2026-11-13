@@ -1,0 +1,16 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m3.test.ts -t M5
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m3.test.ts (16 tests | 14 skipped) 4809ms
+   ✓ M5 hls completed live output pauses and survives restart for local delivery 1615ms
+   ✓ M5 dash completed live output pauses and survives restart for local delivery 1576ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 14 skipped (16)
+   Start at  15:21:37
+   Duration  5.36s (tests 91%, import 8%, transform 1%)
+

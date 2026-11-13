@@ -1,0 +1,15 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m4-http.test.ts -t 'expired output'
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m4-http.test.ts (12 tests | 11 skipped) 9377ms
+   ✓ expired output metadata is removed without extending or deleting the shared input lease 8608ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 11 skipped (12)
+   Start at  14:09:45
+   Duration  10.02s (tests 95%, import 4%)
+

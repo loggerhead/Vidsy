@@ -112,15 +112,15 @@ describe.skipIf(!enabled)('Live media downloads', () => {
             );
           }
           if (process.env.VIDSY_E2E_AI === 'off') await compactButton.click();
-          else await agent.aiTap('the Vidsy Show download options button');
+          else await agent.aiTap('the UUGet Show download options button');
 
           const x1080pChoice = content.getByRole('radio', { name: /^1080p,/ }).first();
           if (site.name === 'X' && (await x1080pChoice.count())) await x1080pChoice.check();
           const downloadButton = content.getByRole('button', { name: /^Download (?:\d+p|video)$/ });
           await downloadButton.waitFor();
-          await aiAssert(agent, 'The Vidsy download menu is open with a video quality choice');
+          await aiAssert(agent, 'The UUGet download menu is open with a video quality choice');
           if (process.env.VIDSY_E2E_AI === 'off') await downloadButton.click();
-          else await agent.aiTap('the primary Download button at the bottom of the Vidsy menu');
+          else await agent.aiTap('the primary Download button at the bottom of the UUGet menu');
 
           const downloaded = await waitForCompletedFile(before);
           const filePath = join(downloadDirectory!, downloaded);

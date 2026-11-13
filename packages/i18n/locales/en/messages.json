@@ -1,17 +1,17 @@
 {
   "extensionDescription": {
     "description": "Extension description",
-    "message": "Detect and download videos and audio from web pages. Multi-connection HTTP, HLS, DASH, and optional browser download interception."
+    "message": "Find videos on the web. Save them in one click. Download video and audio with HTTP, HLS, and DASH support."
   },
   "extensionName": {
     "description": "Extension name",
-    "message": "Vidsy"
+    "message": "UUGet — Video Downloader"
   },
   "toggleTheme": {
     "message": "Toggle theme"
   },
   "displayErrorInfo": {
-    "message": "Error occur"
+    "message": "An error occurred"
   },
   "displayErrorDescription": {
     "message": "Sorry, something went wrong while loading the page."
@@ -23,7 +23,7 @@
     "message": "Unknown error"
   },
   "displayErrorReset": {
-    "message": "Run Again"
+    "message": "Try again"
   },
   "hello": {
     "description": "Placeholder example",

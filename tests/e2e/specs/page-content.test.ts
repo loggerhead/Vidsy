@@ -9,7 +9,7 @@ describe('Content script lifecycle', () => {
     withPage(async (page, agent) => {
       await page.goto('https://example.com');
       await page.locator('#CEB-extension-all').waitFor();
-      await aiAssert(agent, 'The Vidsy content UI is present on the page');
+      await aiAssert(agent, 'The UUGet content UI is present on the page');
       await page.evaluate(() => window.dispatchEvent(new Event('vidsy:stop-content-ui')));
       await page.locator('#CEB-extension-all').waitFor({ state: 'detached' });
       expect(await page.locator('#CEB-extension-example').count()).toBe(1);

@@ -76,7 +76,9 @@ export const parseHlsPlaylist = (manifestText: string, baseUrl: string): HlsPlay
     const line = lines[i];
 
     if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-      mediaSequence = parseInt(line.split(':')[1], 10) || 0;
+      const raw = line.slice('#EXT-X-MEDIA-SEQUENCE:'.length);
+      mediaSequence = Number(raw);
+      if (!/^\d+$/.test(raw) || !Number.isSafeInteger(mediaSequence)) throw new Error('Invalid HLS media sequence');
     }
 
     if (line.startsWith('#EXT-X-MAP:')) {
@@ -112,6 +114,7 @@ export const parseHlsPlaylist = (manifestText: string, baseUrl: string): HlsPlay
     }
 
     if (line && !line.startsWith('#')) {
+      if (!Number.isSafeInteger(mediaSequence + segIndex)) throw new Error('HLS segment sequence exceeds safe limits');
       const url = new URL(line, baseUrl).toString();
       const range = pendingRange
         ? parseRange(pendingRange, previous?.url === url ? previous.range?.end : undefined)

@@ -1,10 +1,14 @@
 // Typed RPC client around WXT's unlisted download worker (`download-worker.js`).
 // The worker owns OPFS. This module is the only place that speaks the worker protocol.
 
+import { cacheCommand } from './cache-client';
+import { DownloadFailure } from './download-failure';
 import { rejectPendingWorkerJobs } from './pending-worker-jobs';
 import { updateProgress } from './progress';
 import { activeAbortControllers } from './segment-fetcher';
+import type { HttpValidationMethod } from './http-validator';
 import type { ExecutableMuxPlan, PlanInput } from './media-processing';
+import type { OutputArtifact } from './output-artifact';
 import type {
   FetchRangesRequest,
   FetchUrlRequest,
@@ -14,15 +18,11 @@ import type {
   WorkerRequest,
   WorkerResponse,
 } from '../download_worker/messages';
-
-// Storage is dynamically imported so its module-level createStorage calls
-// (which can throw in some offscreen contexts when chrome.storage is being
-// looked up by bracket access against a session storage area) can't break
-// the entire offscreen module's load. The actual resume / connection-count
-// reads run on first download, well after module init.
+import type { RangeSource } from '../download_worker/range-resume';
 
 let worker: Worker | null = null;
 let jobCounter = 0;
+const jobFiles = new Map<string, Set<string>>();
 
 const getWorker = (): Worker => {
   if (!worker) {
@@ -38,6 +38,7 @@ type PendingJob = {
   reject: (err: Error) => void;
   onProgress?: (progress: ProgressUpdate) => void;
   reportProgress: boolean;
+  progressOffset?: number;
 };
 type PendingFile = {
   resolve: (file: File) => void;
@@ -71,6 +72,17 @@ const ensureListener = (): void => {
   activeWorker.addEventListener('message', (ev: MessageEvent<WorkerResponse>) => {
     const msg = ev.data;
     switch (msg.type) {
+      case 'cache-request':
+        void cacheCommand(msg.command).then(
+          response => activeWorker.postMessage({ type: 'cache-response', cacheId: msg.cacheId, response }),
+          error =>
+            activeWorker.postMessage({
+              type: 'cache-response',
+              cacheId: msg.cacheId,
+              response: { ok: false, error: String(error) },
+            }),
+        );
+        return;
       case 'diagnostic':
         void chrome.runtime.sendMessage({ type: 'offscreen/download-diagnostic', payload: msg }).catch(() => undefined);
         return;
@@ -114,6 +126,7 @@ const ensureListener = (): void => {
           activity,
           completedParts,
           totalParts,
+          resumeNotice,
         } = msg as ProgressUpdate;
         const pending = pendingFetch.get(msg.jobId);
         if (!pending && !pendingMux.has(msg.jobId)) return;
@@ -121,13 +134,14 @@ const ensureListener = (): void => {
         if (pending?.reportProgress !== false) {
           void updateProgress(jobKey, {
             stage,
-            downloadedBytes,
-            estimatedBytes,
+            downloadedBytes: downloadedBytes + (pending?.progressOffset ?? 0),
+            estimatedBytes: estimatedBytes === undefined ? undefined : estimatedBytes + (pending?.progressOffset ?? 0),
             muxPercent,
             chunks,
             activity,
             completedParts,
             totalParts,
+            resumeNotice,
           });
         }
         return;
@@ -165,7 +179,9 @@ const ensureListener = (): void => {
         return;
       }
       case 'error': {
-        const err = new Error(msg.error);
+        const err = msg.failureKind
+          ? new DownloadFailure(msg.failureKind, msg.error, undefined, msg.retryable)
+          : new Error(msg.error);
         const f = pendingFetch.get(msg.jobId);
         if (f) {
           pendingFetch.delete(msg.jobId);
@@ -210,15 +226,25 @@ const ensureListener = (): void => {
 const send = (req: WorkerRequest): void => {
   if ('jobKey' in req && req.type !== 'cancel') activeAbortControllers.get(req.jobKey)?.signal.throwIfAborted();
   ensureListener();
+  if ('jobKey' in req) {
+    const name = 'opfsName' in req ? req.opfsName : 'outputOpfsName' in req ? req.outputOpfsName : undefined;
+    if (name) {
+      const names = jobFiles.get(req.jobKey) ?? new Set<string>();
+      names.add(name);
+      jobFiles.set(req.jobKey, names);
+    }
+  }
   getWorker().postMessage(req);
 };
 
 const fetchSegmentsToOpfs = (args: {
+  progressOffset?: number;
   jobKey: string;
   opfsName: string;
   segments: SegmentSpec[];
   initUrl?: string;
   initRange?: { start: number; end: number };
+  manifestIdentity?: string;
   keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
 }): Promise<{ opfsName: string; totalBytes: number }> =>
@@ -228,6 +254,7 @@ const fetchSegmentsToOpfs = (args: {
       resolve: totalBytes => resolve({ opfsName: args.opfsName, totalBytes }),
       reject,
       reportProgress: true,
+      progressOffset: args.progressOffset,
     });
     void readMaxConnections()
       .then(maxConnections => {
@@ -241,9 +268,11 @@ const fetchSegmentsToOpfs = (args: {
 
 const readMaxConnections = async (): Promise<number> => {
   try {
-    const { mediaSettingsStorage } = await import('@extension/storage');
-    const s = await mediaSettingsStorage.get();
-    return Math.max(1, Math.min(16, Math.floor(s.downloadConnectionsPerFile ?? 8)));
+    // Chrome exposes runtime, but not storage, to offscreen documents. The
+    // background owns settings reads and passes the value through runtime RPC.
+    const response = await chrome.runtime.sendMessage({ type: 'offscreen/download-settings' });
+    const limit = response?.downloadConnectionsPerFile;
+    return Number.isFinite(limit) ? Math.max(1, Math.min(16, Math.floor(limit))) : 8;
   } catch {
     return 8;
   }
@@ -257,6 +286,8 @@ const fetchRangesToOpfs = (args: {
   ranges: { start: number; end: number }[];
   totalBytes: number;
   resourceVersion?: string;
+  weakEtag?: string;
+  validationMethod?: HttpValidationMethod;
   stage: 'download-video' | 'download-audio';
   maxConnections?: number;
   onProgress?: (progress: ProgressUpdate) => void;
@@ -284,6 +315,8 @@ const fetchRangesToOpfs = (args: {
           totalBytes: args.totalBytes,
           stage: args.stage,
           resourceVersion: args.resourceVersion,
+          weakEtag: args.weakEtag,
+          validationMethod: args.validationMethod,
           maxConnections,
         };
         send(req);
@@ -330,6 +363,32 @@ const getOpfsFile = (opfsName: string): Promise<File> =>
     send({ type: 'get-file', jobId, opfsName });
   });
 
+const adoptHttpSource = (
+  jobKey: string,
+  opfsName: string,
+  source: RangeSource,
+  headers?: Record<string, string>,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const jobId = nextJobId();
+    pendingAck.set(jobId, { resolve, reject });
+    send({ type: 'adopt-http-source', jobId, jobKey, opfsName, source, headers });
+  });
+
+const persistOutputArtifact = (jobKey: string, artifact: OutputArtifact): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const jobId = nextJobId();
+    pendingAck.set(jobId, { resolve, reject });
+    send({ type: 'persist-artifact', jobId, jobKey, artifact });
+  });
+
+const restoreOutputArtifactFile = (jobKey: string, opfsName: string): Promise<File> =>
+  new Promise((resolve, reject) => {
+    const jobId = nextJobId();
+    pendingFile.set(jobId, { resolve, reject });
+    send({ type: 'restore-artifact', jobId, jobKey, opfsName });
+  });
+
 const writeBytesToOpfs = (opfsName: string, bytes: ArrayBuffer): Promise<File> =>
   new Promise((resolve, reject) => {
     const jobId = nextJobId();
@@ -340,10 +399,25 @@ const writeBytesToOpfs = (opfsName: string, bytes: ArrayBuffer): Promise<File> =
 
 const removeOpfs = (opfsName: string): Promise<void> =>
   new Promise((resolve, reject) => {
+    for (const [key, names] of jobFiles) {
+      names.delete(opfsName);
+      if (!names.size) jobFiles.delete(key);
+    }
     const jobId = nextJobId();
     pendingAck.set(jobId, { resolve, reject });
     send({ type: 'remove', jobId, opfsName });
   });
+
+const discardWorkerJobFiles = async (jobKey: string): Promise<void> => {
+  const { records = [] } = await cacheCommand({ operation: 'list' });
+  const names = new Set([
+    ...(jobFiles.get(jobKey) ?? []),
+    ...records.filter(record => record.jobKey === jobKey).map(record => record.name),
+  ]);
+  await Promise.all([...names].map(name => removeOpfs(name)));
+  await cacheCommand({ operation: 'remove-job', jobKey });
+  jobFiles.delete(jobKey);
+};
 
 const cancelWorkerJob = (jobKey: string): void => {
   send({ type: 'cancel', jobKey });
@@ -411,10 +485,14 @@ export {
   fetchRangesToOpfs,
   fetchUrlToOpfs,
   getOpfsFile,
+  persistOutputArtifact,
+  adoptHttpSource,
+  restoreOutputArtifactFile,
   writeBytesToOpfs,
   removeOpfs,
   cancelWorkerJob,
   pingDownloadWorker,
   muxInWorker,
   readMaxConnections,
+  discardWorkerJobFiles,
 };

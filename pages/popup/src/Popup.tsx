@@ -3,9 +3,10 @@ import { PasteUrlRow } from './components/PasteUrlRow';
 import { SettingCard, SettingRow } from './components/SettingCard';
 import { SkeletonFallback, ErrorFallback } from './components/SkeletonFallback';
 import { useMediaPage } from './hooks/useMediaPage';
+import { buildMediaSections } from './lib/media-sections';
 import { DownloadDetailsView } from './views/DownloadDetailsView';
 import { MEDIA_MESSAGE, withErrorBoundary, withSuspense, mediaBadgeLabel, formatDate } from '@extension/shared';
-import { exampleThemeStorage, mediaSettingsStorage } from '@extension/storage';
+import { mediaSettingsStorage } from '@extension/storage';
 import {
   cn,
   BottomBar,
@@ -13,15 +14,9 @@ import {
   EmptyState,
   FilenameTemplateField,
   IconCheck,
-  IconDownload,
   IconHistory,
   IconLink,
-  IconMoon,
   IconPicker,
-  IconSidePanel,
-  IconSun,
-  IconTrash,
-  IconExternal,
   IconVideo,
   IconX,
   IconXCircle,
@@ -58,7 +53,7 @@ const Popup = () => {
     onRetry,
     onClearDownloads,
     onReorder,
-    clearTabDetections,
+    clearDetectionsForTab,
     copyUrl,
     startEdit,
     toggleHlsMerge,
@@ -87,7 +82,13 @@ const Popup = () => {
     return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
   });
   const activeDownloadCount = downloadList.filter(d => ACTIVE_STAGES.has(d.stage)).length;
-  const hasTerminalEntries = downloadList.some(d => !ACTIVE_STAGES.has(d.stage));
+  const FINISHED_STAGES = new Set(['success', 'failed', 'cancelled']);
+  const currentFinishedKeys = downloadList
+    .filter(entry => entry.item?.tabId === tabId && FINISHED_STAGES.has(entry.stage))
+    .map(entry => entry.key);
+  const otherFinishedKeys = downloadList
+    .filter(entry => entry.item?.tabId !== tabId && FINISHED_STAGES.has(entry.stage))
+    .map(entry => entry.key);
 
   const startPicker = () => {
     chrome.runtime
@@ -96,77 +97,33 @@ const Popup = () => {
     window.close();
   };
 
+  const actionClass = cn(
+    'flex min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-[11px] font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0',
+    isLight
+      ? 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300 hover:bg-gray-100'
+      : 'border-white/[0.08] bg-white/[0.04] text-gray-200 hover:bg-white/[0.08]',
+  );
   const popupActions = (
     <>
       <button
-        className={cn(
-          'rounded-lg p-2 transition',
-          isLight
-            ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-            : 'text-gray-500 hover:bg-white/[0.06] hover:text-gray-300',
-        )}
-        title="Pick a video on the page (Alt+Shift+V)"
+        className={actionClass}
+        title="Select a video on this page (Alt+Shift+V)"
+        disabled={tabId === null}
         onClick={startPicker}>
         <IconPicker />
+        <span>Pick video</span>
       </button>
       <button
         className={cn(
-          'rounded-lg p-2 transition',
-          pasteOpen
-            ? isLight
-              ? 'bg-blue-100 text-blue-600'
-              : 'bg-blue-500/15 text-blue-400'
-            : isLight
-              ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-              : 'text-gray-500 hover:bg-white/[0.06] hover:text-gray-300',
+          actionClass,
+          pasteOpen &&
+            (isLight ? 'border-blue-200 bg-blue-50 text-blue-600' : 'border-blue-500/30 bg-blue-500/15 text-blue-400'),
         )}
-        title="Add URL"
+        title="Add a media link manually"
+        aria-expanded={pasteOpen}
         onClick={() => setPasteOpen(o => !o)}>
         <IconLink />
-      </button>
-      <button
-        className={cn(
-          'rounded-lg p-2 transition',
-          isLight
-            ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-            : 'text-gray-500 hover:bg-white/[0.06] hover:text-gray-300',
-        )}
-        title="Toggle theme"
-        onClick={exampleThemeStorage.toggle}>
-        {isLight ? <IconMoon /> : <IconSun />}
-      </button>
-      <button
-        className={cn(
-          'rounded-lg p-2 transition',
-          isLight
-            ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-            : 'text-gray-500 hover:bg-white/[0.06] hover:text-gray-300',
-        )}
-        title="Side Panel"
-        onClick={() => chrome.sidePanel?.open?.({ windowId: chrome.windows?.WINDOW_ID_CURRENT })}>
-        <IconSidePanel />
-      </button>
-      <button
-        className={cn(
-          'rounded-lg p-2 transition',
-          isLight
-            ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-            : 'text-gray-500 hover:bg-white/[0.06] hover:text-gray-300',
-        )}
-        title="Options"
-        onClick={() => chrome.runtime.openOptionsPage()}>
-        <IconExternal />
-      </button>
-      <button
-        className={cn(
-          'rounded-lg p-2 transition',
-          isLight
-            ? 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
-            : 'text-gray-500 hover:bg-white/[0.06] hover:text-gray-300',
-        )}
-        title="Clear detections"
-        onClick={clearTabDetections}>
-        <IconTrash />
+        <span>Add link</span>
       </button>
     </>
   );
@@ -216,72 +173,7 @@ const Popup = () => {
           mediaCount={currentMedia.length}
           downloadCount={activeDownloadCount}
           compact
-        />
-      </div>
-    );
-  }
-
-  /* ── Downloads View ────────────────────────────── */
-  if (view === 'downloads') {
-    return (
-      <div className={cn('flex w-[380px] flex-1 flex-col font-sans', bg, text)}>
-        <Header
-          title="Downloads"
-          isLight={isLight}
-          onBack={() => setView('main')}
-          action={
-            hasTerminalEntries ? (
-              <button
-                onClick={() => onClearDownloads()}
-                className={cn(
-                  'rounded-md px-2.5 py-1 text-[11px] font-medium transition',
-                  isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10',
-                )}>
-                Clear finished
-              </button>
-            ) : null
-          }
-        />
-
-        <div className="flex-1 overflow-y-auto">
-          {downloadList.length === 0 ? (
-            <EmptyState
-              icon={<IconDownload />}
-              title="No active downloads"
-              subtitle="Downloads in progress will appear here"
-              isLight={isLight}
-              className="py-20"
-            />
-          ) : (
-            <div className="space-y-px">
-              {(() => {
-                const queueTotal = downloadList.filter(e => e.stage === 'queued').length;
-                return downloadList.map(entry => (
-                  <DownloadRow
-                    key={entry.key}
-                    entry={entry}
-                    isLight={isLight}
-                    onRetry={onRetry}
-                    onPause={onPause}
-                    onCancel={onCancel}
-                    onRemove={k => onClearDownloads([k])}
-                    onReorder={onReorder}
-                    queueTotal={queueTotal}
-                  />
-                ));
-              })()}
-            </div>
-          )}
-        </div>
-
-        <BottomBar
-          isLight={isLight}
-          view="downloads"
-          onViewChange={setView}
-          actions={popupActions}
-          mediaCount={currentMedia.length}
-          downloadCount={activeDownloadCount}
-          compact
+          merged
         />
       </div>
     );
@@ -360,10 +252,58 @@ const Popup = () => {
           mediaCount={currentMedia.length}
           downloadCount={activeDownloadCount}
           compact
+          merged
         />
       </div>
     );
   }
+
+  const sections = buildMediaSections(
+    tabId,
+    currentMedia.map(item => ({ ...item, tabId: tabId ?? undefined })),
+    downloadList,
+  );
+  const queueTotal = downloadList.filter(entry => entry.stage === 'queued').length;
+  const renderRows = (rows: typeof sections.current) =>
+    rows.map(row =>
+      row.type === 'download' ? (
+        <DownloadRow
+          key={`download:${row.key}`}
+          entry={row.entry}
+          isLight={isLight}
+          onRetry={onRetry}
+          onPause={onPause}
+          onCancel={onCancel}
+          onRemove={key => onClearDownloads([key])}
+          onReorder={onReorder}
+          queueTotal={queueTotal}
+        />
+      ) : (
+        <MediaCard
+          key={`media:${row.key}`}
+          item={row.item}
+          isLight={isLight}
+          downloadState={downloadState}
+          downloads={downloads}
+          selectedVariants={selectedVariants}
+          setSelectedVariants={setSelectedVariants}
+          settings={settings}
+          moreMenuId={moreMenuId}
+          setMoreMenuId={setMoreMenuId}
+          editingId={editingId}
+          setEditingId={setEditingId}
+          editName={editName}
+          setEditName={setEditName}
+          onDownload={onDownload}
+          onCancel={onCancel}
+          startEdit={startEdit}
+          copyUrl={copyUrl}
+          onDismiss={() => {
+            if (row.item.tabId !== undefined) clearDetectionsForTab(row.item.tabId);
+          }}
+        />
+      ),
+    );
 
   /* ── Main View ─────────────────────────────────── */
   return (
@@ -384,50 +324,99 @@ const Popup = () => {
         </div>
       ) : null}
 
-      {pasteOpen ? <PasteUrlRow isLight={isLight} tabId={tabId} onClose={() => setPasteOpen(false)} /> : null}
-
-      <div className="flex-1 overflow-y-auto">
+      {downloadList.some(entry =>
+        ['queued', 'init', 'fetch-manifest', 'download-video', 'download-audio', 'mux', 'finalize'].includes(
+          entry.stage,
+        ),
+      ) ? (
+        <button
+          className="mx-4 my-2 rounded-md border px-3 py-2 text-xs"
+          title="Pause downloads; non-Range streams restart on Resume. Incomplete live snapshots are stopped."
+          onClick={() => chrome.runtime.sendMessage({ type: 'media/pause-all' })}>
+          Pause all
+        </button>
+      ) : null}
+      {downloadList.some(entry => entry.stage === 'paused') ? (
+        <button
+          className="mx-4 my-2 rounded-md border px-3 py-2 text-xs"
+          onClick={() => chrome.runtime.sendMessage({ type: 'media/resume-all' })}>
+          Resume all
+        </button>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="space-y-px">
             <SkeletonCard isLight={isLight} />
             <SkeletonCard isLight={isLight} />
           </div>
-        ) : currentMedia.length === 0 ? (
-          <EmptyState
-            icon={<IconVideo />}
-            title="No media detected"
-            subtitle="Play a video or audio on this page to capture it"
-            isLight={isLight}
-            className="py-20"
-          />
         ) : (
-          <div className="space-y-px">
-            {currentMedia.map(item => (
-              <MediaCard
-                key={item.id}
-                item={item}
-                isLight={isLight}
-                downloadState={downloadState}
-                downloads={downloads}
-                selectedVariants={selectedVariants}
-                setSelectedVariants={setSelectedVariants}
-                settings={settings}
-                moreMenuId={moreMenuId}
-                setMoreMenuId={setMoreMenuId}
-                editingId={editingId}
-                setEditingId={setEditingId}
-                editName={editName}
-                setEditName={setEditName}
-                onDownload={onDownload}
-                onCancel={onCancel}
-                startEdit={startEdit}
-                copyUrl={copyUrl}
-                onDismiss={clearTabDetections}
-              />
-            ))}
-          </div>
+          <>
+            <section aria-label="Current page">
+              <div className="flex items-center justify-between px-4 pb-1 pt-3">
+                <h2 className={cn('text-[11px] font-semibold', textMuted)}>Current page</h2>
+                <div className="flex items-center gap-2">
+                  {currentFinishedKeys.length > 0 ? (
+                    <button
+                      onClick={() => onClearDownloads(currentFinishedKeys)}
+                      className={cn(
+                        'rounded-md px-2 py-1 text-[11px] transition',
+                        isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10',
+                      )}>
+                      Clear finished
+                    </button>
+                  ) : null}
+                  <span
+                    title="Detected media on this page"
+                    aria-label={`Detected media on this page: ${currentMedia.length}`}
+                    className={cn('flex items-center gap-1 text-[10px] [&>svg]:h-3.5 [&>svg]:w-3.5', textMuted)}>
+                    <IconVideo />
+                    <span
+                      className={cn(
+                        'rounded-md px-1.5 py-0.5 font-medium tabular-nums',
+                        isLight ? 'bg-blue-50 text-blue-600' : 'bg-blue-500/15 text-blue-400',
+                      )}>
+                      {currentMedia.length}
+                    </span>
+                  </span>
+                </div>
+              </div>
+              {sections.current.length ? (
+                renderRows(sections.current)
+              ) : (
+                <EmptyState
+                  icon={<IconVideo />}
+                  title="No media detected"
+                  subtitle="Play a video or audio on this page to capture it"
+                  isLight={isLight}
+                  className="py-10"
+                />
+              )}
+            </section>
+            {sections.other.length > 0 ? (
+              <section
+                aria-label="Other downloads"
+                className={cn('mt-3 border-t', isLight ? 'border-gray-200' : 'border-white/[0.06]')}>
+                <div className="flex items-center justify-between px-4 pb-1 pt-3">
+                  <h2 className={cn('text-[11px] font-semibold', textMuted)}>Downloads from other pages</h2>
+                  {otherFinishedKeys.length > 0 ? (
+                    <button
+                      onClick={() => onClearDownloads(otherFinishedKeys)}
+                      className={cn(
+                        'rounded-md px-2 py-1 text-[11px] transition',
+                        isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10',
+                      )}>
+                      Clear finished
+                    </button>
+                  ) : null}
+                </div>
+                {renderRows(sections.other)}
+              </section>
+            ) : null}
+          </>
         )}
       </div>
+
+      {pasteOpen ? <PasteUrlRow isLight={isLight} tabId={tabId} onClose={() => setPasteOpen(false)} /> : null}
 
       <BottomBar
         isLight={isLight}
@@ -437,6 +426,7 @@ const Popup = () => {
         mediaCount={currentMedia.length}
         downloadCount={activeDownloadCount}
         compact
+        merged
       />
     </div>
   );

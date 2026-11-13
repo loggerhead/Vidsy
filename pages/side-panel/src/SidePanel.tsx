@@ -148,6 +148,25 @@ const SidePanel = () => {
             ) : null
           }
         />
+        {downloadList.some(entry =>
+          ['queued', 'init', 'fetch-manifest', 'download-video', 'download-audio', 'mux', 'finalize'].includes(
+            entry.stage,
+          ),
+        ) ? (
+          <button
+            className="mx-4 my-2 rounded-md border px-3 py-2 text-xs"
+            title="Pause downloads; non-Range streams restart on Resume. Incomplete live snapshots are stopped."
+            onClick={() => chrome.runtime.sendMessage({ type: 'media/pause-all' })}>
+            Pause all
+          </button>
+        ) : null}
+        {downloadList.some(entry => entry.stage === 'paused') ? (
+          <button
+            className="mx-4 my-2 rounded-md border px-3 py-2 text-xs"
+            onClick={() => chrome.runtime.sendMessage({ type: 'media/resume-all' })}>
+            Resume all
+          </button>
+        ) : null}
         <div className="flex-1 overflow-y-auto">
           {downloadList.length === 0 ? (
             <EmptyState

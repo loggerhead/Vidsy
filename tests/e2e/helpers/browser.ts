@@ -53,6 +53,7 @@ const importXCookies = async (browserContext: BrowserContext) => {
 };
 
 const startBrowser = async () => {
+  const nativeExtensionLoad = process.env.VIDSY_E2E_NATIVE_EXTENSION_LOAD === 'true';
   removeProfileAfterRun = !process.env.VIDSY_E2E_PROFILE_DIR;
   profileDirectory = removeProfileAfterRun
     ? await mkdtemp(join(tmpdir(), 'vidsy-midscene-'))
@@ -62,8 +63,16 @@ const startBrowser = async () => {
     headless: process.env.VIDSY_E2E_HEADED !== 'true',
     acceptDownloads: true,
     downloadsPath: downloadDirectory,
-    args: [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`],
+    ignoreDefaultArgs: nativeExtensionLoad ? ['--disable-extensions'] : [],
+    args: nativeExtensionLoad
+      ? ['--enable-unsafe-extension-debugging', '--enable-automation']
+      : [`--disable-extensions-except=${extensionDirectory}`, `--load-extension=${extensionDirectory}`],
   });
+  if (nativeExtensionLoad) {
+    const session = await context.browser()!.newBrowserCDPSession();
+    await session.send('Extensions.loadUnpacked', { path: extensionDirectory });
+    await session.detach();
+  }
   await importXCookies(context);
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
   extensionOrigin = `chrome-extension://${new URL(worker.url()).host}`;

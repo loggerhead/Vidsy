@@ -17,6 +17,19 @@ test('HLS ranges retain initialization offsets, explicit offsets and implicit sa
   );
 });
 
+test('HLS sequence identity rejects malformed, negative and unsafe segment indices', () => {
+  for (const sequence of ['-1', 'abc', '1x', '9007199254740992'])
+    assert.throws(
+      () => parseHlsPlaylist(`#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:${sequence}\npart.ts`, 'https://cdn.test/p.m3u8'),
+      /Invalid HLS media sequence/,
+    );
+  const parsed = parseHlsPlaylist('#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:101\na.ts\nb.ts', 'https://cdn.test/p.m3u8');
+  assert.deepEqual(
+    parsed.segments.map(segment => segment.sequenceNumber),
+    [101, 102],
+  );
+});
+
 test('HLS implicit offsets require a prior range of the same resource', () => {
   for (const content of [
     '#EXT-X-BYTERANGE:20\none.mp4',

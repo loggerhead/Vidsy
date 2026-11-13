@@ -25,6 +25,7 @@ export const useMediaPage = () => {
   const { isLight } = useStorage(exampleThemeStorage);
 
   const [tabId, setTabId] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [downloadState, setDownloadState] = useState<DownloadState>({ busyUrl: null, error: null });
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   // Allow callers to deep-link to a specific view via URL hash, e.g. when the
@@ -54,17 +55,18 @@ export const useMediaPage = () => {
       chrome.tabs.query({ active: true, currentWindow: true }),
       chrome.tabs.query({ active: true }),
       chrome.tabs.query({}),
-    ]).then(([currentWindowTabs, activeTabs, allTabs]) => {
-      setTabId(selectMediaPageTab(currentWindowTabs, activeTabs, allTabs)?.id ?? null);
-    });
+    ])
+      .then(([currentWindowTabs, activeTabs, allTabs]) => {
+        setTabId(selectMediaPageTab(currentWindowTabs, activeTabs, allTabs)?.id ?? null);
+      })
+      .catch(() => setTabId(null))
+      .finally(() => setIsLoading(false));
   }, []);
 
   const currentMedia = useMemo(() => {
     if (!tabId || !detections) return [] as MediaItem[];
     return detections[String(tabId)] ?? [];
   }, [tabId, detections]);
-
-  const isLoading = tabId === null;
 
   useEffect(() => {
     const next: Record<string, string> = {};
@@ -116,12 +118,13 @@ export const useMediaPage = () => {
         kind: item.kind,
         fileName: item.fileName,
         title: item.title,
-        tabId: tabId ?? undefined,
+        tabId: item.tabId ?? tabId ?? undefined,
         outputFormat,
         audioUrl,
         audioMimeType,
         item: {
           ...item,
+          tabId: item.tabId ?? tabId ?? undefined,
           url: chosenUrl,
           mimeType: chosenVariant?.mimeType ?? item.mimeType,
           resolution: chosenVariant?.resolution ?? item.resolution,
@@ -168,9 +171,13 @@ export const useMediaPage = () => {
     await chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.QUEUE_REORDER, payload: { key, direction } });
   };
 
+  const clearDetectionsForTab = (sourceTabId: number) => {
+    chrome.runtime
+      .sendMessage({ type: MEDIA_MESSAGE.CLEAR_TAB, payload: { tabId: sourceTabId } })
+      .catch(() => undefined);
+  };
   const clearTabDetections = () => {
-    if (!tabId) return;
-    chrome.runtime.sendMessage({ type: MEDIA_MESSAGE.CLEAR_TAB, payload: { tabId } }).catch(() => undefined);
+    if (tabId !== null) clearDetectionsForTab(tabId);
   };
 
   const copyUrl = (url: string) => {
@@ -222,6 +229,7 @@ export const useMediaPage = () => {
     onClearDownloads,
     onReorder,
     clearTabDetections,
+    clearDetectionsForTab,
     copyUrl,
     startEdit,
     toggleHlsMerge,

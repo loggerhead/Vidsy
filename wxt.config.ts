@@ -46,6 +46,8 @@ export default defineConfig({
   }),
   manifest: {
     default_locale: 'en',
+    homepage_url: 'https://uu0uu.com',
+    action: { default_title: 'UUGet' },
     name: '__MSG_extensionName__',
     version: '1.1.0',
     description: '__MSG_extensionDescription__',

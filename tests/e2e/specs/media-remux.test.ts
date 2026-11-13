@@ -37,7 +37,7 @@ const startFixtureServer = async () => {
     if (path === '/') {
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end(
-        '<!doctype html><title>Vidsy HEVC Fixture</title><button id="load">Load media</button><script>document.querySelector("#load").onclick=()=>fetch("/hevc/playlist.m3u8")</script>',
+        '<!doctype html><title>UUGet HEVC Fixture</title><button id="load">Load media</button><script>document.querySelector("#load").onclick=()=>fetch("/hevc/playlist.m3u8")</script>',
       );
       return;
     }
@@ -103,7 +103,7 @@ const findDetection = async (): Promise<Detection | undefined> =>
 
 const findProgress = async (): Promise<Progress | undefined> =>
   extensionWorker().evaluate(async () => {
-    const state = (await chrome.storage.session.get('media-downloads'))['media-downloads'] ?? {};
+    const state = (await chrome.storage.local.get('media-downloads'))['media-downloads'] ?? {};
     return (Object.values(state) as (Progress & { item?: Detection })[]).find(item =>
       item.item?.url.includes('/hevc/playlist.m3u8'),
     );
@@ -127,13 +127,14 @@ describe.skipIf(!enabled)('HEVC media remux', () => {
       await expect.poll(findDetection, { timeout: 15_000 }).toBeTruthy();
     });
     const detection = (await findDetection())!;
+    expect(detection.kind).toBe('hls');
     await withNewPage(async (page, agent) => {
       await page.goto(extensionUrl('popup.html'));
-      await expect.poll(() => page.locator('body').innerText()).toContain('HLS');
-      await aiAssert(agent, 'The Vidsy popup shows a detected HLS media item with a Download button');
+      await page.getByRole('button', { name: 'Download', exact: true }).first().waitFor();
+      await aiAssert(agent, 'The UUGet popup shows the detected media item with a Download button');
 
       await extensionWorker().evaluate(async item => {
-        await chrome.storage.session.set({
+        await chrome.storage.local.set({
           'media-downloads': {
             [item.id]: {
               key: item.id,
@@ -149,7 +150,7 @@ describe.skipIf(!enabled)('HEVC media remux', () => {
       }, detection);
       await expect.poll(() => page.locator('body').innerText()).toContain('23%');
       expect(await page.getByRole('button', { name: 'Download', exact: true }).count()).toBe(0);
-      await extensionWorker().evaluate(async () => chrome.storage.session.set({ 'media-downloads': {} }));
+      await extensionWorker().evaluate(async () => chrome.storage.local.set({ 'media-downloads': {} }));
       const downloadButton = page.getByRole('button', { name: 'Download', exact: true }).first();
       await downloadButton.waitFor();
       if (process.env.VIDSY_E2E_AI === 'off') await downloadButton.click();

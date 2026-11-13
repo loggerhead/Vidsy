@@ -1,8 +1,13 @@
 // Shared message protocol between the offscreen main thread and the download worker.
 // The worker owns OPFS; the main thread still runs ffmpeg.wasm (mounts OPFS Files via WORKERFS).
 
+import type { RangeSource } from './range-resume';
+import type { CacheCommand, CacheResponse } from '../lib/cache-protocol';
+import type { DownloadFailureKind } from '../lib/download-failure';
+import type { HttpValidationMethod } from '../lib/http-validator';
 import type { HlsKeyInfo } from '../lib/m3u8-parser';
 import type { ExecutableMuxPlan, PlanInput } from '../lib/media-processing';
+import type { OutputArtifact } from '../lib/output-artifact';
 import type { ChunkProgress } from '@extension/shared';
 
 export type JobKey = string;
@@ -22,6 +27,7 @@ export type FetchSegmentsRequest = {
   segments: SegmentSpec[];
   initUrl?: string;
   initRange?: { start: number; end: number };
+  manifestIdentity?: string;
   maxConnections?: number;
   keyHeaders?: Record<string, string>;
   stage: 'download-video' | 'download-audio';
@@ -47,6 +53,8 @@ export type FetchRangesRequest = {
   ranges: { start: number; end: number }[];
   totalBytes: number;
   resourceVersion?: string;
+  weakEtag?: string;
+  validationMethod?: HttpValidationMethod;
   stage: 'download-video' | 'download-audio';
   // Prior chunk states from a paused or interrupted run of this same key.
   // The worker uses these to skip dispatching chunks that already completed
@@ -97,6 +105,17 @@ export type MuxRequest = {
 export type PingRequest = { type: 'ping' };
 
 export type WorkerRequest =
+  | {
+      type: 'adopt-http-source';
+      jobId: string;
+      jobKey: string;
+      opfsName: string;
+      source: RangeSource;
+      headers?: Record<string, string>;
+    }
+  | { type: 'persist-artifact'; jobId: string; jobKey: string; artifact: OutputArtifact }
+  | { type: 'restore-artifact'; jobId: string; jobKey: string; opfsName: string }
+  | { type: 'cache-response'; cacheId: string; response: CacheResponse }
   | { type: 'url-authorized'; authorizationId: string; downloadKey?: string; url?: string; error?: string }
   | FetchSegmentsRequest
   | FetchUrlRequest
@@ -109,6 +128,7 @@ export type WorkerRequest =
   | PingRequest;
 
 export type ProgressUpdate = {
+  resumeNotice?: string;
   type: 'progress';
   jobId: string;
   jobKey: JobKey;
@@ -151,11 +171,14 @@ export type WorkerError = {
   type: 'error';
   jobId: string;
   error: string;
+  failureKind?: DownloadFailureKind;
+  retryable?: boolean;
 };
 
 export type Pong = { type: 'pong' };
 
 export type WorkerResponse =
+  | { type: 'cache-request'; cacheId: string; command: CacheCommand }
   | { type: 'diagnostic'; event: string; data: unknown }
   | ProgressUpdate
   | FetchDone

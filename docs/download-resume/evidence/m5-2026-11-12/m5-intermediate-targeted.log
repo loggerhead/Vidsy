@@ -1,0 +1,45 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m5.test.ts -t 'reported cellular|non-Range source'
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ❯ specs/resume-m5.test.ts (6 tests | 1 failed | 4 skipped) 21206ms
+   ↓ paused details distinguish visible progress from verified cache, next offset and remaining payload
+   ↓ popup Pause all includes queued work and side-panel Resume all preserves configured concurrency
+   ↓ settings expose cache usage, persistent-storage outcome, update existing TTL and discard only paused files
+   ✓ a reported cellular transition pauses valid cache without recovery and explicit Resume allows this connection 10885ms
+   ↓ manual metered fallback pauses active work and holds new downloads before network dispatch
+   × a non-Range source offers Stop; a batch pause explicitly resumes by downloading the whole stream again 8910ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  specs/resume-m5.test.ts > a non-Range source offers Stop; a batch pause explicitly resumes by downloading the whole stream again
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ specs/resume-m5.test.ts:270:104
+    268|   await send({ type: 'media/control', payload: { key, intent: 'resume'…
+    269|   await verify(key);
+    270|   expect(requests.slice(before).some(request => request.path === path …
+       |                                                                                                        ^
+    271| });
+    272|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 4 skipped (6)
+   Start at  14:54:50
+   Duration  21.89s (tests 98%, import 2%)
+
+/Users/bytedance/my-projects/Vidsy/tests/e2e:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @extension/e2e@1.1.0 e2e: `vitest run --config vitest.config.ts specs/resume-m5.test.ts -t 'reported cellular|non-Range source'`
+Exit status 1

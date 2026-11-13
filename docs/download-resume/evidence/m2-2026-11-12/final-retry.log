@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m2.test.ts (5 tests | 4 skipped) 2317ms
+   ✓ disconnecting during the final retry leaves a recoverable failure with cached bytes 1073ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  12:42:18
+   Duration  2.82s (tests 84%, import 15%, transform 1%)
+

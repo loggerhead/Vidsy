@@ -10,7 +10,7 @@ describe('Content UI injection', () => {
       await page.goto('https://example.com');
       await page.locator('#CEB-extension-all').waitFor({ state: 'attached' });
       await page.locator('#CEB-extension-example').waitFor();
-      await aiAssert(agent, 'The example web page is visible with the Vidsy content UI');
+      await aiAssert(agent, 'The example web page is visible with the UUGet content UI');
     }));
 
   it('injects only the all-sites UI on other sites', async () =>
@@ -25,6 +25,6 @@ describe('Content UI injection', () => {
       await page.goto('http://example.com/');
       await page.locator('#CEB-extension-all').waitFor({ state: 'attached' });
       expect(await page.locator('#CEB-extension-example').count()).toBe(0);
-      await aiAssert(agent, 'The web page is visible with the Vidsy content UI');
+      await aiAssert(agent, 'The web page is visible with the UUGet content UI');
     }));
 });

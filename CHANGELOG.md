@@ -1,6 +1,19 @@
 # Changelog
 
-All notable user-facing changes to Vidsy. Dates are in UTC.
+All notable user-facing changes to UUGet. Dates are in UTC.
+
+## Unreleased — download recovery M0–M5
+
+- Retain completed ranges, atomic HLS/DASH parts and complete media inputs on transfer or mux failure. Retry checks cached input and fetches only missing ranges/parts or reruns processing.
+- Surface transport, processing and integrity failures with actionable reasons. Integrity failures discard affected inputs; ignored Range responses no longer silently erase progress and switch to a full stream download.
+- Preserve final checkpoints when a failure overtakes a coalesced progress report. Keep visible downloaded bytes across Retry and clean retained files on cancel or removing a failed task.
+- Read connection settings through background runtime RPC, matching Chrome's offscreen API restrictions.
+- Add local HTTP persistent-403 coverage and production-browser mux-failure recovery checks for HTTP, split audio/video, HLS and DASH. Versioned task, progress and input ledgers now persist in storage.local, with one-time migration from session storage. Browser restart, crash and extension reload restore retained tasks as paused; redetection validates and continues the original task. Popup and side panel offer Resume all. Cache retention defaults to 7 days, supports configured TTL and capacity LRU, and cancel removes retained files and records. Transient transfer errors now automatically pause with durable, bounded exponential recovery; reconnection resumes automatically paused jobs. Chrome alarms recover after background suspension or wake. Manual pause/cancel fence retries, exhaustion retains cache and worker backoff can be cancelled immediately. HLS/DASH VOD checkpoints resume across sessions with independent tracks, atomic validated segment files and persistent media descriptors. Playlist/sequence changes discard old parts and explicitly restart. Live snapshots expose Stop and cannot resume incomplete transport; completed snapshots retain immutable inputs and the original manifest for processing Retry across restart. Cumulative fetched bytes remain visible through processing. M4 adds Date If-Range and validator-free boundary validation, acknowledged 1 MiB HTTP/Range-segment/init checkpoints, ciphertext checkpoints before complete AES-128 decryption, one expired URL/header reparse with strict alias validation, and verified output re-delivery after restart with a 24-hour lease. Shared passthrough inputs retain independent leases. Non-Range inputs explicitly retry their incomplete stream/segment in full.
+
+- Show probed resume capabilities and honest Stop / download-again / Deliver again actions. Paused details show verified cached bytes, the next HTTP payload offset and remaining payload; recovery and validation failures retain readable reasons. Add Pause all and Resume all without bypassing queue limits. Pause all stops incomplete live snapshots with a readable restart reason while preserving completed-input/output recovery.
+- Add Partial download cache settings with usage, persistence outcome, 1–365-day input retention, and per-task or all paused/failed cache discard. Request persistent storage explicitly; browser refusal does not block downloads. Changing retention preserves original timestamps and the separate 24-hour output lease.
+- Pause on reported cellular or data-saver connections, retain valid cached work and disable automatic reconnect recovery for that pause. Explicit Resume permits the current connection. Provide a manual metered flag when Chrome cannot report connection type; never infer cellular service from effective network speed.
+- Preserve completed live outputs for local delivery after pause/restart, fence late output validation/hash publication after cancel, clean interrupted jobs even if their previous execution ID was lost, and refresh an expired source from the unique exact original page when tab IDs change. Keep separate audio/video request credentials scoped to their own track.
 
 ## 1.1.0 — 2026-06-03
 

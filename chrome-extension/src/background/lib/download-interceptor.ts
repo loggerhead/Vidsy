@@ -1,17 +1,17 @@
 // Download interceptor — catches browser-initiated downloads and offers to
-// route them through Vidsy via a modal in the originating tab.
+// route them through UUGet via a modal in the originating tab.
 //
 // When the setting `enableDownloadInterceptor` is on, listens for browser-
 // initiated video/audio downloads via chrome.downloads.onCreated, cancels +
 // erases them, and asks the content-ui in a content-script-capable tab to
-// show a modal offering the choice between Vidsy and browser native handling.
+// show a modal offering the choice between UUGet and browser native handling.
 //
 // Many downloads spawn a transient about:blank tab and arrive with empty
 // `referrer` / `filename` fields — the tab lookup falls through several
 // strategies before giving up, and the MIME filter checks the URL path
 // extension when both the MIME and filename are unhelpful.
 //
-// Vidsy's own downloads (offscreen doc → chrome.downloads.download against
+// UUGet's own downloads (offscreen doc → chrome.downloads.download against
 // a blob: URL) and re-issued browser downloads bypass this listener via
 // URL prefix matching and a short-lived "recently resumed" allowlist.
 

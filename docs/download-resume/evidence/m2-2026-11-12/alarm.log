@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m2.test.ts (4 tests | 3 skipped) 67957ms
+   ✓ a persistent recovery alarm restarts a suspended background and continues cached bytes 67170ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 3 skipped (4)
+   Start at  12:36:11
+   Duration  68.46s (tests 99%, import 1%)
+

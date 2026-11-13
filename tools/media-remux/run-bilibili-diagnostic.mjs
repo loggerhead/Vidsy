@@ -195,7 +195,7 @@ const mediaRequest = url =>
 const attachTarget = async target => {
   // Chrome exposes internal UI/background targets that either do not
   // implement Runtime.enable or never answer it. They are irrelevant to this
-  // diagnostic and previously prevented us from reaching the Vidsy worker.
+  // diagnostic and previously prevented us from reaching the UUGet worker.
   if (!['page', 'service_worker', 'worker'].includes(target.type)) return undefined;
   if (!target.webSocketDebuggerUrl || clients.has(target.id)) return clients.get(target.id);
   const client = new Cdp(target.webSocketDebuggerUrl, target);
@@ -363,7 +363,7 @@ try {
   }
   if (!workerClient) {
     throw new Error(
-      `Vidsy service worker was not found. The selected browser may reject --load-extension; use Chromium or Chrome for Testing and set CHROME_BIN.\n${chromeErrors}`,
+      `UUGet service worker was not found. The selected browser may reject --load-extension; use Chromium or Chrome for Testing and set CHROME_BIN.\n${chromeErrors}`,
     );
   }
   await report('runner', 'worker.ready');

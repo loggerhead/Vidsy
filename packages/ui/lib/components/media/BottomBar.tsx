@@ -12,6 +12,7 @@ export const BottomBar = ({
   mediaCount,
   downloadCount,
   compact = false,
+  merged = false,
 }: {
   isLight: boolean;
   view: BottomBarView;
@@ -21,6 +22,7 @@ export const BottomBar = ({
   mediaCount?: number;
   downloadCount?: number;
   compact?: boolean;
+  merged?: boolean;
 }) => {
   const active = (v: string) => view === v;
   const btnCls = (v: string) =>
@@ -38,6 +40,39 @@ export const BottomBar = ({
 
   const mediaBadge = mediaCount && mediaCount > 0 ? mediaCount : null;
   const downloadBadge = downloadCount && downloadCount > 0 ? downloadCount : null;
+
+  if (merged) {
+    return (
+      <div
+        className={cn(
+          'mt-auto flex shrink-0 items-center gap-2 border-t px-3 py-2.5',
+          isLight ? 'border-gray-200 bg-white' : 'border-white/[0.08] bg-[#0f1117]',
+        )}>
+        <button
+          title="Media and downloads"
+          onClick={() => onViewChange('main')}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-[10px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            isLight ? 'text-gray-600 hover:bg-gray-50' : 'text-gray-300 hover:bg-white/[0.04]',
+          )}>
+          <span
+            title="Active and queued downloads"
+            aria-label={`Active and queued downloads: ${downloadCount ?? 0}`}
+            className="flex items-center gap-1 [&>svg]:h-3.5 [&>svg]:w-3.5">
+            <IconDownload />
+            <span
+              className={cn(
+                'rounded-md px-1.5 py-0.5 tabular-nums',
+                isLight ? 'bg-gray-100 text-gray-700' : 'bg-white/[0.08] text-gray-200',
+              )}>
+              {downloadCount ?? 0}
+            </span>
+          </span>
+        </button>
+        {actions ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
+      </div>
+    );
+  }
 
   return (
     <div

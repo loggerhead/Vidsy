@@ -11,7 +11,7 @@ import {
   IconX,
 } from './icons';
 import { cn } from '../../utils';
-import { formatDuration } from '@extension/shared';
+import { formatDuration, formatFileSize, describeResumeCapability, describeResumeValidation } from '@extension/shared';
 import type { MediaDownloadProgress } from '@extension/shared';
 
 const ACTIVE_STAGES = new Set([
@@ -50,6 +50,7 @@ export const DownloadRow = ({
   const isFailed = entry.stage === 'failed';
   const isCancelled = entry.stage === 'cancelled';
   const isPaused = entry.stage === 'paused';
+  const canPause = entry.resumeCapability !== undefined && !['none', 'restart'].includes(entry.resumeCapability);
   const canRetry = (isFailed || isCancelled || isPaused) && !!item;
 
   const displayName = item?.title?.trim() || (item?.fileName ?? entry.key).replace(/\.[^.]+$/, '').replace(/_/g, ' ');
@@ -66,6 +67,20 @@ export const DownloadRow = ({
         isQueued && 'opacity-70',
         isLight ? 'hover:bg-gray-50' : 'hover:bg-white/[0.02]',
       )}>
+      <p className="mb-2 text-[11px] opacity-70">{describeResumeCapability(entry.resumeCapability)}</p>
+      {isPaused && entry.cachedBytes !== undefined ? (
+        <p className="mb-2 text-[11px] opacity-70">
+          Cached: {formatFileSize(entry.cachedBytes) || '0 B'} · Resume from{' '}
+          {formatFileSize(entry.resumeFromBytes) || '0 B'}
+          {entry.remainingDownloadBytes !== undefined
+            ? ` · Est. remaining: ${formatFileSize(entry.remainingDownloadBytes) || '0 B'}`
+            : ''}
+        </p>
+      ) : null}
+      {entry.resumeNotice ? <p className="mb-2 text-[11px] opacity-70">{entry.resumeNotice}</p> : null}
+      {entry.validationMethod ? (
+        <p className="mb-2 text-[11px] opacity-70">Validation: {describeResumeValidation(entry.validationMethod)}</p>
+      ) : null}
       <div className="flex gap-3">
         <div
           className={cn(
@@ -143,7 +158,7 @@ export const DownloadRow = ({
                   </button>
                 </>
               ) : null}
-              {isQueued ? null : (
+              {isQueued || !canPause ? null : (
                 <button
                   className={cn(
                     'flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold transition',
@@ -163,9 +178,16 @@ export const DownloadRow = ({
                     ? 'bg-red-100 text-red-600 hover:bg-red-200'
                     : 'bg-red-500/15 text-red-400 hover:bg-red-500/25',
                 )}
-                title={isQueued ? 'Remove from queue' : 'Cancel download'}
+                title={
+                  isQueued
+                    ? 'Remove from queue'
+                    : entry.resumeCapability === 'none'
+                      ? 'Stop snapshot (live streams cannot resume)'
+                      : 'Cancel download'
+                }
                 onClick={() => onCancel(entry.key)}>
                 <IconX />
+                {!isQueued && !canPause ? 'Stop' : null}
               </button>
             </div>
           ) : isSuccess ? (
@@ -221,11 +243,23 @@ export const DownloadRow = ({
                   onClick={() => onRetry(entry)}>
                   {isPaused ? (
                     <>
-                      <IconPlay /> Resume
+                      <IconPlay />{' '}
+                      {entry.resumeCapability === 'none'
+                        ? 'Restart snapshot'
+                        : entry.resumeCapability === 'artifact'
+                          ? 'Deliver again'
+                          : entry.resumeCapability === 'restart'
+                            ? 'Resume (downloads again)'
+                            : 'Resume'}
                     </>
                   ) : (
                     <>
-                      <IconRefresh /> Retry
+                      <IconRefresh />{' '}
+                      {entry.resumeCapability === 'artifact'
+                        ? 'Deliver again'
+                        : entry.resumeCapability === 'none'
+                          ? 'Restart snapshot'
+                          : 'Retry'}
                     </>
                   )}
                 </button>

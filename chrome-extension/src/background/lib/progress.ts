@@ -29,9 +29,18 @@ type ProgressUpdate = {
   connectionLimit?: number;
   fallbackReason?: string;
   queuePosition?: number;
+  resumeNotice?: string;
+  cachedBytes?: number;
+  resumeFromBytes?: number;
+  nextRangeOffset?: number;
+  remainingDownloadBytes?: number;
+  resumeCapability?: 'segments' | 'none' | 'range' | 'restart' | 'complete-input' | 'artifact';
+  validationMethod?: 'etag' | 'last-modified' | 'boundary-sample' | 'manifest' | 'local-checksums' | 'mixed';
 };
 
 type ProgressContext = {
+  cacheExpiresAt?: number;
+  clearCacheExpiry?: boolean;
   item?: MediaItem;
   outputFormat?: 'mp4' | 'mp3';
   revision?: number;
@@ -65,14 +74,19 @@ export const updateProgress = (key: string, progress: ProgressUpdate, context?: 
     if (existing && terminal.has(existing.stage) && !context) return;
     const now = Date.now();
     const entry: MediaDownloadProgress = {
+      schemaVersion: 1,
+      cacheExpiresAt:
+        context?.clearCacheExpiry || ['cancelled', 'success'].includes(progress.stage)
+          ? undefined
+          : (context?.cacheExpiresAt ?? existing?.cacheExpiresAt),
       key,
       stage: progress.stage,
       downloadedBytes: progress.downloadedBytes,
       estimatedBytes: progress.estimatedBytes ?? existing?.estimatedBytes,
       muxPercent: progress.muxPercent,
       activity: progress.activity,
-      completedParts: progress.completedParts,
-      totalParts: progress.totalParts,
+      completedParts: progress.completedParts ?? existing?.completedParts,
+      totalParts: progress.totalParts ?? existing?.totalParts,
       error: progress.error,
       downloadId: progress.downloadId ?? (context?.clearDownloadId ? undefined : existing?.downloadId),
       item: context?.item ?? existing?.item,
@@ -80,6 +94,15 @@ export const updateProgress = (key: string, progress: ProgressUpdate, context?: 
       startedAt: existing?.startedAt ?? now,
       updatedAt: now,
       revision: context?.revision ?? existing?.revision,
+      resumeNotice: progress.stage === 'cancelled' ? undefined : (progress.resumeNotice ?? existing?.resumeNotice),
+      resumeCapability:
+        progress.resumeCapability ??
+        (context?.reset && progress.stage === 'init' ? undefined : existing?.resumeCapability),
+      validationMethod: progress.validationMethod ?? existing?.validationMethod,
+      cachedBytes: progress.cachedBytes ?? existing?.cachedBytes,
+      resumeFromBytes: progress.resumeFromBytes ?? existing?.resumeFromBytes,
+      nextRangeOffset: progress.nextRangeOffset,
+      remainingDownloadBytes: progress.remainingDownloadBytes ?? existing?.remainingDownloadBytes,
       chunks: progress.chunks ?? existing?.chunks,
       transferMode: progress.transferMode ?? existing?.transferMode,
       activeConnections: progress.activeConnections ?? existing?.activeConnections,

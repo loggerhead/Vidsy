@@ -75,6 +75,34 @@ test('cancel intent survives a stop before asynchronous execution starts', async
   assert.equal(registry.inventory()[0].report.type, 'cancelled');
 });
 
+test('an immediate failure carries the final checkpoint even when progress publication was coalesced', async () => {
+  let fail!: (error: Error) => void;
+  const registry = createExecutionRegistry({
+    execute: async () =>
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+    stop: async () => {},
+    publish: async () => {},
+  });
+  registry.start(command);
+  await settle();
+  const progress = {
+    stage: 'download-video' as const,
+    downloadedBytes: 50,
+    estimatedBytes: 100,
+    chunks: [{ i: 0, start: 0, end: 49, status: 'done' as const, downloaded: 50 }],
+  };
+  registry.progress(command.requestId, progress);
+  fail(new Error('HTTP 403'));
+  await settle();
+  const report = registry.inventory()[0].report;
+  assert.ok(report.type === 'failed');
+  assert.equal(report.progress?.downloadedBytes, 50);
+  assert.deepEqual(report.progress?.chunks, progress.chunks);
+  registry.forget(command.executionId);
+});
+
 test('retries an unacknowledged terminal report without re-executing the download', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let executions = 0,

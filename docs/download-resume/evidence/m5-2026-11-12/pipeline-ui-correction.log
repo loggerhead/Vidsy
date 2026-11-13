@@ -1,0 +1,22 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/download-pipeline.test.ts specs/page-popup.test.ts -t 'clears terminal task|shows current-page|separate audio/video|resumes separate|cross-origin'
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/download-pipeline.test.ts (24 tests | 20 skipped) 6091ms
+   ✓ durable download pipeline (24)
+     ✓ downloads and validates separate audio/video through the production queue 725ms
+     ✓ resumes separate video and audio without refetching completed track ranges 3198ms
+     ✓ does not forward source credentials to a cross-origin HLS rendition 331ms
+     ✓ clears terminal task records without blocking the next download 410ms
+ ✓ specs/page-popup.test.ts (2 tests | 1 skipped) 1953ms
+   ✓ Extension popup (2)
+     ✓ shows current-page media, other-page downloads, and labeled toolbar actions 1143ms
+
+ Test Files  2 passed (2)
+      Tests  5 passed | 21 skipped (26)
+   Start at  16:05:02
+   Duration  9.16s (tests 90%, import 9%)
+

@@ -1,0 +1,14 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m1.test.ts (7 tests | 6 skipped) 8159ms
+   ✓ TTL removes expired partial files and checkpoints while leaving an actionable reason 3731ms
+ ✓ specs/resume-m3.test.ts (10 tests | 8 skipped) 4481ms
+   ✓ hls completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 1985ms
+   ✓ dash completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 1816ms
+
+ Test Files  2 passed (2)
+      Tests  3 passed | 14 skipped (17)
+   Start at  13:04:12
+   Duration  13.69s (tests 94%, import 6%)
+

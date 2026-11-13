@@ -1,0 +1,37 @@
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/download-pipeline.test.ts (24 tests) 47844ms
+   ✓ durable download pipeline (24)
+     ✓ downloads and validates HTTP through the production queue 566ms
+     ✓ downloads and validates DASH through the production queue 383ms
+     ✓ assembles a single-resource HLS playlist using exact byte ranges 411ms
+     ✓ rechecks an unknown start outcome after both start and inventory transport failures 377ms
+     ✓ pause and resume preserve completed byte ranges 2789ms
+     ✓ resumes separate video and audio without refetching completed track ranges 2721ms
+     ✓ persistent 403 at 50% retries only missing ranges and preserves visible progress 9812ms
+     ✓ a failed request can retry, and a fresh request can download the same URL again 1328ms
+     ✓ cancels queued work before network dispatch and removes cancelled partial files 936ms
+     ✓ reattaches to a running offscreen execution after the background stops 2779ms
+     ✓ isolates captured credentials for concurrent requests on the same CDN 4588ms
+     ✓ limits actual concurrent public downloads to the configured two jobs 4121ms
+     ✓ does not forward source credentials to a cross-origin HLS rendition 436ms
+     ✓ pauses during delayed browser acceptance and resumes from the retained artifact 2634ms
+     ✓ releases a finalizing task when its browser download record is missing 447ms
+     ✓ clears terminal task records without blocking the next download 539ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash/manifest.mpd 463ms
+     ✓ downloads an authenticated DASH template with padded segment numbers: /dash-layout/manifest.mpd 487ms
+     ✓ standalone controls resume the same task and create a fresh identity after cancellation 7245ms
+     ✓ popup, side panel and options clear history through the background writer 2416ms
+ ✓ specs/resume-m0.test.ts (5 tests) 3262ms
+   ✓ real merged mux failure retains inputs; Retry performs no media requests and delivers validated tracks 699ms
+   ✓ real HTTP MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 353ms
+   ✓ real stream MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 336ms
+   ✓ real HLS mux failure retains inputs; Retry performs no media requests and delivers validated tracks 403ms
+   ✓ real DASH mux failure retains inputs; Retry performs no media requests and delivers validated tracks 450ms
+
+ Test Files  2 passed (2)
+      Tests  29 passed (29)
+   Start at  11:19:05
+   Duration  52.20s (tests 98%, import 2%)
+

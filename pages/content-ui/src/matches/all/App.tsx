@@ -192,7 +192,7 @@ const App = () => {
   }, [videos, tabItems, isHovered, open, busyUrl]);
 
   /* Download intercept: background cancels a media download and asks us to
-     show a modal so the user can route it through Vidsy or open in browser. */
+     show a modal so the user can route it through UUGet or open in browser. */
   useEffect(() => {
     const handler = (message: { type?: string; payload?: unknown }) => {
       if (message?.type === MEDIA_MESSAGE.INTERCEPT_SHOW) {

@@ -20,3 +20,18 @@ test('delayed cleanup removes an output exactly once and duplicate messages are 
   assert.deepEqual(revoked, [blobUrl]);
   assert.deepEqual(removed, ['output.mp4']);
 });
+
+test('native interruption revokes the old blob while retaining the verified file', async () => {
+  let removed = 0;
+  const revoked: string[] = [];
+  registerOutputForCleanup('blob:interrupted', 'saved.mp4');
+  await cleanupBlob('blob:interrupted', {
+    preserveOutput: true,
+    revokeObjectUrl: url => revoked.push(url),
+    removeOutput: async () => {
+      removed++;
+    },
+  });
+  assert.deepEqual(revoked, ['blob:interrupted']);
+  assert.equal(removed, 0);
+});

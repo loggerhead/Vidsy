@@ -1,10 +1,10 @@
-import { resolve } from 'node:path';
 import { defineWxtModule } from 'wxt/modules';
+import { resolve } from 'node:path';
 
 /** Preserve the existing locale ownership while placing it at WXT's MV3 path. */
 export default defineWxtModule({
   setup(wxt) {
-    wxt.logger.debug('Registering Vidsy locale and page-logo public assets');
+    wxt.logger.debug('Registering UUGet locale and page-logo public assets');
     wxt.hook('build:publicAssets', (_wxt, files) => {
       for (const locale of ['en', 'ko']) {
         files.unshift({

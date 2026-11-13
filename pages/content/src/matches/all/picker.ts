@@ -2,7 +2,7 @@ import { MEDIA_MESSAGE } from '@extension/shared';
 
 // "Pick a video on the page" overlay. Activated by a runtime message from
 // the background (popup button or Alt+Shift+V hotkey). Lets the user hover
-// any element to highlight it, then click to send its media URL to Vidsy.
+// any element to highlight it, then click to send its media URL to UUGet.
 //
 // Extraction rules (in order):
 //   1. The clicked element if it's <video>, <audio>, or <source>

@@ -252,6 +252,71 @@ test('failed attempts can retry and independent requests can download the same U
   assert.notEqual(again.jobId, jobId);
 });
 
+test('Retry preserves the visible byte high water mark while cached ranges are being verified', async () => {
+  const runtime = createDownloadRuntime({ store: memoryStore(), concurrency: 1 });
+  const { jobId } = await runtime.submit(spec('retained'));
+  await runtime.schedule();
+  const first = active(await runtime.snapshot(), 'retained');
+  const identity = { jobId, attempt: first.attempt, executionId: first.executionId! };
+  await runtime.executorEvent({ ...identity, type: 'acknowledged' });
+  await runtime.executorEvent({
+    ...identity,
+    type: 'progress',
+    phase: 'fetching',
+    downloadedBytes: 50,
+    estimatedBytes: 100,
+  });
+  await runtime.executorEvent({ ...identity, type: 'failed', reason: 'HTTP 403' });
+  await runtime.command(jobId, { type: 'retry' });
+  await runtime.schedule();
+  const second = active(await runtime.snapshot(), 'retained');
+  const retry = { jobId, attempt: second.attempt, executionId: second.executionId! };
+  await runtime.executorEvent({ ...retry, type: 'acknowledged' });
+  await runtime.executorEvent({
+    ...retry,
+    type: 'progress',
+    phase: 'fetching',
+    downloadedBytes: 0,
+    estimatedBytes: 100,
+  });
+  assert.equal(active(await runtime.snapshot(), 'retained').progress.downloadedBytes, 50);
+  await runtime.executorEvent({
+    ...retry,
+    type: 'progress',
+    phase: 'fetching',
+    downloadedBytes: 75,
+    estimatedBytes: 100,
+  });
+  assert.equal(active(await runtime.snapshot(), 'retained').progress.downloadedBytes, 75);
+});
+
+test('cancel and clearing a failed task both release retained executor inputs', async () => {
+  for (const command of ['cancel', 'clear-terminal'] as const) {
+    const stops: string[] = [];
+    const runtime = createDownloadRuntime({
+      store: memoryStore(),
+      concurrency: 1,
+      executor: {
+        cancel: async identity => {
+          stops.push(identity.requestId);
+        },
+      },
+    });
+    const { jobId } = await runtime.submit(spec('failed-cache'));
+    await runtime.schedule();
+    const job = active(await runtime.snapshot(), 'failed-cache');
+    await runtime.executorEvent({
+      jobId,
+      attempt: job.attempt,
+      executionId: job.executionId!,
+      type: 'failed',
+      reason: 'network',
+    });
+    assert.equal(await runtime.command(jobId, { type: command }), true);
+    assert.deepEqual(stops, ['failed-cache']);
+  }
+});
+
 test('cancellation holds its slot until the executor has actually stopped', async () => {
   const runtime = createDownloadRuntime({ store: memoryStore(), concurrency: 1 });
   const { jobId } = await runtime.submit(spec('one'));
@@ -366,4 +431,77 @@ test('resuming an existing artifact still waits for a concurrency slot', async (
   assert.equal(current.state, 'finalizing');
   assert.equal(current.attempt, first.attempt);
   assert.equal(current.executionId, first.executionId);
+});
+
+test('restart preserves a generated output and retries only its interrupted browser delivery', async () => {
+  const store = memoryStore();
+  const runtime = createDownloadRuntime({ store, concurrency: 1 });
+  const { jobId } = await runtime.submit(spec('artifact-restart'));
+  await runtime.schedule();
+  const first = (await runtime.snapshot()).jobs[0];
+  const identity = { jobId, attempt: first.attempt, executionId: first.executionId! };
+  await runtime.executorEvent({ ...identity, type: 'acknowledged' });
+  await runtime.executorEvent({ ...identity, type: 'ready' });
+  const recovered = createDownloadRuntime({
+    store,
+    concurrency: 1,
+    recoverCheckpoint: async () => ({ downloadedBytes: 1234, artifactAvailable: true }),
+  });
+  await recovered.bootstrap({ executions: [] });
+  assert.equal((await recovered.snapshot()).jobs[0].state, 'paused');
+  await recovered.command(jobId, { type: 'resume' });
+  await recovered.schedule();
+  assert.equal((await recovered.snapshot()).jobs[0].attempt, first.attempt);
+  await recovered.executorEvent({ ...identity, type: 'artifact', downloadId: 99 });
+  await recovered.browserDelivery({ jobId, downloadId: 99, state: 'interrupted' });
+  await recovered.command(jobId, { type: 'retry' });
+  await recovered.schedule();
+  const retry = (await recovered.snapshot()).jobs[0];
+  assert.equal(retry.state, 'finalizing');
+  assert.equal(retry.attempt, first.attempt);
+  assert.equal(retry.downloadId, undefined);
+});
+
+test('source renewal persists the candidate and a pause fences late renewal', async () => {
+  const runtime = createDownloadRuntime({ store: memoryStore(), concurrency: 1 });
+  const { jobId } = await runtime.submit(spec('renewal'));
+  await runtime.schedule();
+  const first = (await runtime.snapshot()).jobs[0];
+  const identity = { jobId, attempt: first.attempt, executionId: first.executionId! };
+  await runtime.executorEvent({ ...identity, type: 'acknowledged' });
+  const execution = { ...first.execution, url: 'https://media.test/video.mp4?token=new' };
+  assert.equal(
+    await runtime.command(jobId, { type: 'source-renewed', executionId: identity.executionId, execution }),
+    true,
+  );
+  assert.equal((await runtime.snapshot()).jobs[0].execution.url, execution.url);
+  await runtime.command(jobId, { type: 'pause' });
+  assert.equal(
+    await runtime.command(jobId, {
+      type: 'source-renewed',
+      executionId: identity.executionId,
+      execution: { ...execution, url: 'https://media.test/late.mp4' },
+    }),
+    false,
+  );
+  assert.equal((await runtime.snapshot()).jobs[0].execution.url, execution.url);
+});
+
+test('queued pause preserves undispatched work and metered pause requires an explicit resume override', async () => {
+  const runtime = createDownloadRuntime({
+    store: memoryStore(),
+    concurrency: 1,
+    canStart: job => job.execution.allowMetered === true,
+  });
+  const { jobId } = await runtime.submit(spec('metered'));
+  await runtime.schedule();
+  assert.equal((await runtime.snapshot()).jobs[0].attempt, 0);
+  await runtime.command(jobId, { type: 'pause', metered: true, reason: 'Paused on a metered network' });
+  assert.equal((await runtime.snapshot()).jobs[0].state, 'paused');
+  await runtime.command(jobId, { type: 'recovery-check', online: true, immediate: true });
+  assert.equal((await runtime.snapshot()).jobs[0].state, 'paused');
+  await runtime.command(jobId, { type: 'resume' });
+  await runtime.schedule();
+  assert.equal((await runtime.snapshot()).jobs[0].state, 'starting');
+  assert.equal((await runtime.snapshot()).jobs[0].execution.allowMetered, true);
 });

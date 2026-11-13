@@ -1,0 +1,39 @@
+
+> @extension/e2e@1.1.0 e2e /Users/bytedance/my-projects/Vidsy/tests/e2e
+> vitest run --config vitest.config.ts specs/resume-m0.test.ts specs/resume-m3.test.ts specs/resume-m4-http.test.ts
+
+
+ RUN  v5.0.5 /Users/bytedance/my-projects/Vidsy/tests/e2e
+
+ ✓ specs/resume-m4-http.test.ts (8 tests) 72375ms
+   ✓ /date.mp4 resumes verified weak-source cache after browser restart 9249ms
+   ✓ /weak-date.mp4 resumes verified weak-source cache after browser restart 9160ms
+   ✓ /none.mp4 resumes verified weak-source cache after browser restart 9881ms
+   ✓ an interrupted large Range resumes inside its chunk with at most 1 MiB lost payload 9141ms
+   ✓ validator-free boundary mismatch explicitly discards old bytes and delivers the new complete file 8099ms
+   ✓ mutating an interior cached byte is detected before resume and triggers an explained full restart 7943ms
+   ✓ an interrupted native delivery survives browser restart and is delivered without a media request 8915ms
+   ✓ expired signed URL is reparsed once and verified cached ranges survive the new URL 8567ms
+ ✓ specs/resume-m3.test.ts (10 tests) 15579ms
+   ✓ hls VOD cross-session resume only fetches missing segments 2006ms
+   ✓ hls retains complete video and resumes only unfinished audio 2138ms
+   ✓ hls manifest/sequence drift explicitly restarts instead of splicing old segments 795ms
+   ✓ hls live snapshot exposes Stop and never promises Resume 480ms
+   ✓ dash VOD cross-session resume only fetches missing segments 1720ms
+   ✓ dash retains complete video and resumes only unfinished audio 1614ms
+   ✓ dash manifest/sequence drift explicitly restarts instead of splicing old segments 975ms
+   ✓ dash live snapshot exposes Stop and never promises Resume 469ms
+   ✓ hls completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 2265ms
+   ✓ dash completed live snapshot survives mux failure and restart; Retry needs no media or playlist requests 2318ms
+ ✓ specs/resume-m0.test.ts (5 tests) 3207ms
+   ✓ real merged mux failure retains inputs; Retry performs no media requests and delivers validated tracks 582ms
+   ✓ real HTTP MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 415ms
+   ✓ real stream MP3 mux failure retains inputs; Retry performs no media requests and delivers validated tracks 448ms
+   ✓ real HLS mux failure retains inputs; Retry performs no media requests and delivers validated tracks 458ms
+   ✓ real DASH mux failure retains inputs; Retry performs no media requests and delivers validated tracks 629ms
+
+ Test Files  3 passed (3)
+      Tests  23 passed (23)
+   Start at  14:04:21
+   Duration  92.65s (tests 99%, import 1%)
+
