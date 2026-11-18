@@ -1,0 +1,26 @@
+Domain migration: billing.uu0uu.com -> uuget.uu0uu.com (2026-11-18)
+
+== wrangler deploy (production) ==
+Deployed uuget-billing triggers
+  uuget.uu0uu.com (custom domain)
+  schedule: 17 * * * *
+Current Version ID: 90bed2a8-655b-45df-af15-1399a65f8e43
+
+== DNS (DNS-over-HTTPS, dns.google) ==
+uuget.uu0uu.com A -> 104.21.36.232, 172.67.200.204
+billing.uu0uu.com -> NXDOMAIN (old custom domain record removed)
+
+== health ==
+GET https://uuget.uu0uu.com/health
+{"ok":true,"service":"uuget-billing","environment":"production","version":"1.2.0"}
+status=200
+
+== old domain ==
+GET https://billing.uu0uu.com/health
+error code: 1016
+status=530
+
+== Creem webhook update ==
+PATCH https://api.creem.io/v1/webhooks/wh_7eNDYzXCPm1faoiFJ7jWNh
+{"url":"https://uuget.uu0uu.com/webhooks/creem","status":"enabled",...}
+status=200

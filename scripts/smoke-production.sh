@@ -4,14 +4,14 @@
 # and checks that unsigned/forged webhooks and unknown license keys are rejected.
 #
 # Usage:
-#   BASE=https://billing.uu0uu.com ./scripts/smoke-production.sh
-#   BASE=https://billing.uu0uu.com RESOLVE_IP=104.21.36.232 ./scripts/smoke-production.sh
+#   BASE=https://uuget.uu0uu.com ./scripts/smoke-production.sh
+#   BASE=https://uuget.uu0uu.com RESOLVE_IP=104.21.36.232 ./scripts/smoke-production.sh
 set -euo pipefail
 
-BASE="${BASE:-https://billing.uu0uu.com}"
+BASE="${BASE:-https://uuget.uu0uu.com}"
 CURL=(curl -sS -m 30)
 if [[ -n "${RESOLVE_IP:-}" ]]; then
-  CURL+=(--resolve "billing.uu0uu.com:443:${RESOLVE_IP}")
+  CURL+=(--resolve "uuget.uu0uu.com:443:${RESOLVE_IP}")
 fi
 
 DEVICE_ID="dev_smoke-$(date +%s)-$(openssl rand -hex 4)"

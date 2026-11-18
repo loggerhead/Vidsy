@@ -1,0 +1,25 @@
+
+ ⛅️ wrangler 4.164.0
+────────────────────
+Total Upload: 116.98 KiB / gzip: 28.02 KiB
+Your Worker has access to the following bindings:
+Binding                                                                               Resource                  
+env.DB (uuget-billing)                                                                D1 Database               
+env.ENVIRONMENT ("production")                                                        Environment Variable      
+env.BILLING_ENFORCEMENT ("on")                                                        Environment Variable      
+env.CORS_ORIGINS ("https://uu0uu.com")                                                Environment Variable      
+env.PRICING_URL ("https://uu0uu.com/pricing")                                         Environment Variable      
+env.SUPPORT_EMAIL ("support@uu0uu.com")                                               Environment Variable      
+env.EXTENSION_OPTIONS_URL ("chrome-extension://<store-id>/options...")                Environment Variable      
+env.RATE_LIMIT_REGISTER_PER_HOUR ("10")                                               Environment Variable      
+env.RATE_LIMIT_AUTHORIZE_PER_MINUTE ("60")                                            Environment Variable      
+env.RATE_LIMIT_CHECKOUT_PER_HOUR ("10")                                               Environment Variable      
+env.CREEM_API_BASE ("https://api.creem.io")                                           Environment Variable      
+env.CHECKOUT_SUCCESS_URL ("https://uu0uu.com/billing/success")                        Environment Variable      
+env.PRODUCTS_JSON ("{"credits_10":"prod_4VOHZYrMiFHIoKZuK...")                        Environment Variable      
+
+Uploaded uuget-billing (8.32 sec)
+Deployed uuget-billing triggers (6.05 sec)
+  uuget.uu0uu.com (custom domain)
+  schedule: 17 * * * *
+Current Version ID: 90bed2a8-655b-45df-af15-1399a65f8e43

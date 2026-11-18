@@ -51,7 +51,7 @@ authoritative; Creem only needs to return the same ids.
 All six use `tax_mode=inclusive`, `tax_category=saas`, `external_id=<productKey>`
 and return URL `https://uu0uu.com/billing/success`. These ids are already wired
 into the production `PRODUCTS_JSON` in `server/wrangler.toml`. The live webhook
-is `wh_7eNDYzXCPm1faoiFJ7jWNh` on `https://billing.uu0uu.com/webhooks/creem`.
+is `wh_7eNDYzXCPm1faoiFJ7jWNh` on `https://uuget.uu0uu.com/webhooks/creem`.
 The script `server/scripts/create-creem-products.mjs` can re-create or discover
 the products; it writes ids to the git-ignored
 `server/.env.creem-products.json`.

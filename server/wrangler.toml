@@ -71,7 +71,7 @@ name = "uuget-billing"
 workers_dev = false
 
 [[env.production.routes]]
-pattern = "billing.uu0uu.com"
+pattern = "uuget.uu0uu.com"
 custom_domain = true
 
 [env.production.vars]

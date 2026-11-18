@@ -551,7 +551,7 @@ CREATE TABLE webhook_events (
 实现：
 
 - 生产 Creem 产品、生产 webhook、生产 secrets、D1 生产库与迁移。
-- Cloudflare 自定义域（如 `billing.uu0uu.com`）、WAF/限流、日志与告警。
+- Cloudflare 自定义域（`uuget.uu0uu.com`）、WAF/限流、日志与告警。
 - `BILLING_ENFORCEMENT` kill switch；生产默认 `on`，异常时一键 `off`。
 - `PRIVACY.html`、`TERMS.html`、`REFUND.html` 更新并在 License 面板/结账前链接。
 - 在 `uu0uu.com` 提供 `/billing/success` 静态页：提示“支付已完成，请返回 UUGet”；若展示支付结果，必须验 `signature`（SHA-256，`salt=<apiKey>`）。
@@ -622,7 +622,7 @@ pnpm wrangler secret put SNAPSHOT_PRIVATE_KEY --env staging
 ## 10. 执行前需要用户提供的输入
 
 1. Creem 测试/生产产品 ID（6 个），或授权用 Creem API/CLI 创建。
-2. Billing Worker 域名（建议 `billing.uu0uu.com`）与 Cloudflare 账号/Zone。
+2. Billing Worker 域名（`uuget.uu0uu.com`）与 Cloudflare 账号/Zone。
 3. 扩展的商店 ID 与本地 unpacked ID（用于 CORS/深链）。
 4. 支持邮箱（退款、恢复购买、账号删除）。
 5. 确认免费额度 `2/天`、点数包价格、Pro `$4.99/月`、`$39/年`。

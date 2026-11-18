@@ -216,7 +216,7 @@ refund and zero-byte confirmations) must be settled first.
 
 ### Cloudflare edge
 
-1. Attach the custom domain (for example `billing.uu0uu.com`) to the Worker.
+1. Attach the custom domain (for example `uuget.uu0uu.com`) to the Worker.
 2. Add WAF/rate-limit rules for `/v1/*` and `/webhooks/*`. The Worker already
    rate-limits device requests (`429 rate_limited`); edge rules are the outer
    layer.
@@ -256,12 +256,12 @@ data.
 Production was launched by the agent with the owner's explicit authorization.
 
 - Creem live products: six, ids in `creem-setup.md` §1; webhook
-  `wh_7eNDYzXCPm1faoiFJ7jWNh` → `https://billing.uu0uu.com/webhooks/creem`.
+  `wh_7eNDYzXCPm1faoiFJ7jWNh` → `https://uuget.uu0uu.com/webhooks/creem`.
 - Cloudflare account `89a8933410e86f415bb8ceb07b4ea26b`, zone `uu0uu.com`.
 - D1 `uuget-billing` (production) = `78bcc728-f6f9-455a-ae5f-158fed8e1bcd`,
   migrations `0001` + `0002` applied.
-- Worker `uuget-billing` version `07a308fb-a1a0-4341-a513-b19ad18a3ccb`,
-  custom domain `billing.uu0uu.com`, cron `17 * * * *`.
+- Worker `uuget-billing` version `90bed2a8-655b-45df-af15-1399a65f8e43`,
+  custom domain `uuget.uu0uu.com`, cron `17 * * * *`.
 - Pages project `uuget-site` serves `uu0uu.com` (apex CNAME, proxied).
 - Snapshot key `uuget-2026-11`; public JWK embedded in the extension and stored
   in GitHub Actions repo variables for CI builds.

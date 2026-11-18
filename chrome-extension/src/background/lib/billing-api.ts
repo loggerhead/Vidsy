@@ -9,7 +9,7 @@ import type {
   UpgradeOptions,
 } from '@extension/shared';
 
-export const DEFAULT_BILLING_API_URL = 'https://billing.uu0uu.com';
+export const DEFAULT_BILLING_API_URL = 'https://uuget.uu0uu.com';
 const REQUEST_TIMEOUT_MS = 8000;
 
 export type BillingIdentity = { deviceId: string; deviceToken: string };

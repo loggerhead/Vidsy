@@ -108,3 +108,17 @@ Logs: `smoke.log`, `synthetic-webhook.log`, `synthetic-subscription.log`,
 - WAF custom rules and alert policies beyond the Worker's built-in rate limits
   and `observability.enabled=true`; the Worker cron and 5xx logs are available in
   Cloudflare observability.
+
+## Post-launch domain migration (2026-11-18)
+
+The Worker domain was changed from `billing.uu0uu.com` to `uuget.uu0uu.com`
+after the initial launch. Worker version `90bed2a8-655b-45df-af15-1399a65f8e43`
+is deployed on the new custom domain; the old custom domain DNS record is gone
+(`NXDOMAIN`, HTTPS returns Cloudflare 1016/530). The Creem webhook
+`wh_7eNDYzXCPm1faoiFJ7jWNh` now points at
+`https://uuget.uu0uu.com/webhooks/creem` (PATCH 200). The extension's
+`DEFAULT_BILLING_API_URL` and all operator docs were updated; the rebuilt
+artifact is still version `1.2.0` and synced to `~/Downloads/UUGet` (`diff -r`
+clean). New-domain smoke test: `domain-migration-smoke.log` (health, register,
+entitlement with snapshot, live checkout session, 401 unsigned/forged webhook,
+404 unknown license key). Deploy output: `domain-migration-deploy.log`.
