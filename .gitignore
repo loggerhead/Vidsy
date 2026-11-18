@@ -18,6 +18,10 @@ tsconfig.tsbuildinfo
 **/.env.*
 **/.env
 
+# Cloudflare Worker local state and secrets
+**/.wrangler/
+**/.dev.vars
+
 # ffmpeg wasm assets (fetched via pnpm --filter chrome-extension fetch:ffmpeg)
 chrome-extension/public/ffmpeg/ffmpeg-core.js
 chrome-extension/public/ffmpeg/ffmpeg-core.wasm
@@ -41,3 +45,6 @@ midscene_run/
 
 # Local libav sources and compiler toolchain
 /.cache/
+
+# Generated static site bundle for Cloudflare Pages
+site/

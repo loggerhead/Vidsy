@@ -21,6 +21,7 @@ import {
   IconX,
   IconXCircle,
   MediaCard,
+  PaywallDialog,
   SkeletonCard,
   Toggle,
 } from '@extension/ui';
@@ -48,6 +49,10 @@ const Popup = () => {
     history,
     isLight,
     onDownload,
+    closePaywall,
+    buyProduct,
+    restorePurchase,
+    manageSubscription,
     onCancel,
     onPause,
     onRetry,
@@ -427,6 +432,19 @@ const Popup = () => {
         downloadCount={activeDownloadCount}
         compact
         merged
+      />
+
+      <PaywallDialog
+        open={Boolean(downloadState.paywall)}
+        isLight={isLight}
+        free={downloadState.paywall?.free}
+        credits={downloadState.paywall?.credits}
+        subscription={downloadState.paywall?.subscription}
+        error={downloadState.error}
+        onClose={closePaywall}
+        onPurchase={productKey => void buyProduct(productKey)}
+        onRestore={restorePurchase}
+        onManage={() => void manageSubscription()}
       />
     </div>
   );

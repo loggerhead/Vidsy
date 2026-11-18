@@ -40,13 +40,23 @@ import {
   setupHeaderCapture,
 } from './lib/header-capture';
 import { clearHistory } from './lib/history';
+import {
+  PaymentRequiredError,
+  activateLicense,
+  flushPendingReports,
+  getLocalStatus,
+  openPortal,
+  reconcileLocalState,
+  startCheckout,
+  syncEntitlement,
+} from './lib/license';
 import { deriveKind, deriveFileName } from './lib/media-utils';
 import { createNetworkCaptureAdmission } from './lib/network-capture-admission';
 import { classifyAndAddUrl } from './lib/paste-url';
 import { updateProgress } from './lib/progress';
 import { selectRenewedUrl, renewalChanged, selectSourceTab } from './lib/source-renewal';
 import { createTabWorkLifecycle } from './lib/tab-work-lifecycle';
-import { createLogger, MEDIA_MESSAGE } from '@extension/shared';
+import { createLogger, LICENSE_MESSAGE, MEDIA_MESSAGE } from '@extension/shared';
 import { configureSessionAccessLevel, mediaSettingsStorage } from '@extension/storage';
 import type { MediaMessage } from '@extension/shared';
 
@@ -180,11 +190,27 @@ export const startBackground = (): void => {
     ['responseHeaders', 'extraHeaders'],
   );
 
+  // ─── Billing sync ───
+  const runLicenseSync = async (): Promise<void> => {
+    try {
+      const reconciled = await reconcileLocalState();
+      if (reconciled.pendingReports > 0 || reconciled.staleCommitted > 0) log.info('license.reconcile', reconciled);
+      const flushed = await flushPendingReports();
+      if (flushed > 0) log.info('license.reports_flushed', { count: flushed });
+      const result = await syncEntitlement();
+      if (!result.ok) log.debug('license.sync_failed', { error: result.error });
+    } catch (error) {
+      log.warn('license.sync_failed', String(error));
+    }
+  };
+
   // ─── Message listener ───
   void chrome.alarms.create('uuget-cache-gc', { periodInMinutes: 15 });
+  void chrome.alarms.create('uuget-license-sync', { periodInMinutes: 6 * 60 });
   chrome.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === 'uuget-cache-gc')
       void collectDownloadCache().catch(error => log.warn('cache.gc_failed', String(error)));
+    if (alarm.name === 'uuget-license-sync') void runLicenseSync();
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   chrome.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
@@ -231,6 +257,44 @@ export const startBackground = (): void => {
           );
         }
         sendResponse({ ok: true });
+        return;
+      }
+      if (message.type === LICENSE_MESSAGE.STATUS) {
+        sendResponse({ ok: true, status: await getLocalStatus() });
+        return;
+      }
+      if (message.type === LICENSE_MESSAGE.REFRESH) {
+        sendResponse(await syncEntitlement());
+        return;
+      }
+      if (message.type === LICENSE_MESSAGE.CHECKOUT) {
+        const productKey = typeof message.payload?.productKey === 'string' ? message.payload.productKey : '';
+        const result = await startCheckout(productKey);
+        if (result.ok) {
+          try {
+            await chrome.tabs.create({ url: result.checkoutUrl });
+          } catch (error) {
+            log.warn('license.checkout_tab_failed', String(error));
+          }
+        }
+        sendResponse(result);
+        return;
+      }
+      if (message.type === LICENSE_MESSAGE.PORTAL) {
+        const result = await openPortal();
+        if (result.ok) {
+          try {
+            await chrome.tabs.create({ url: result.portalUrl });
+          } catch (error) {
+            log.warn('license.portal_tab_failed', String(error));
+          }
+        }
+        sendResponse(result);
+        return;
+      }
+      if (message.type === LICENSE_MESSAGE.ACTIVATE) {
+        const licenseKey = typeof message.payload?.licenseKey === 'string' ? message.payload.licenseKey : '';
+        sendResponse(await activateLicense(licenseKey));
         return;
       }
       if (message.type === 'offscreen/download-diagnostic') {
@@ -557,13 +621,29 @@ export const startBackground = (): void => {
         return;
       }
       if (msg.type === MEDIA_MESSAGE.CONTROL) {
-        if (msg.payload.intent === 'again') {
-          const result = await againDownload(msg.payload.key, msg.payload.requestId ?? crypto.randomUUID());
-          sendResponse(result ? { ok: true, ...result } : { ok: false, error: 'Download task not found' });
-          return;
+        try {
+          if (msg.payload.intent === 'again') {
+            const result = await againDownload(msg.payload.key, msg.payload.requestId ?? crypto.randomUUID());
+            sendResponse(result ? { ok: true, ...result } : { ok: false, error: 'Download task not found' });
+            return;
+          }
+          const ok = await retryDownload(msg.payload.key, msg.payload.intent);
+          sendResponse({ ok });
+        } catch (error) {
+          if (error instanceof PaymentRequiredError) {
+            sendResponse({
+              ok: false,
+              code: 'PAYMENT_REQUIRED',
+              error: error.message,
+              free: error.verdict.free,
+              credits: error.verdict.credits,
+              subscription: error.verdict.subscription,
+              upgrade: error.verdict.upgrade,
+            });
+            return;
+          }
+          throw error;
         }
-        const ok = await retryDownload(msg.payload.key, msg.payload.intent);
-        sendResponse({ ok });
         return;
       }
       if (msg.type === MEDIA_MESSAGE.CANCEL) {
@@ -839,8 +919,15 @@ export const startBackground = (): void => {
     }
   };
 
-  chrome.runtime.onInstalled.addListener(createContextMenus);
-  chrome.runtime.onStartup.addListener(createContextMenus);
+  chrome.runtime.onInstalled.addListener(() => {
+    createContextMenus();
+    void runLicenseSync();
+  });
+  chrome.runtime.onStartup.addListener(() => {
+    createContextMenus();
+    void runLicenseSync();
+  });
+  void runLicenseSync();
 
   // ─── Hotkey: Alt+Shift+V activates the element picker on the active tab ───
   chrome.commands.onCommand.addListener(async command => {

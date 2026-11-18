@@ -1,0 +1,869 @@
+
+> chrome-extension@1.1.0 pretest /Users/bytedance/my-projects/Vidsy/chrome-extension
+> node ../tools/media-remux/prepare-test-media.mjs
+
+Prepared deterministic media inputs and container-validation fixtures. These are not evidence of browser/libav acceptance.
+
+> chrome-extension@1.1.0 test /Users/bytedance/my-projects/Vidsy/chrome-extension
+> node --import tsx --test "src/**/*.test.ts"
+
+✔ browser download acceptance is not a success terminal (0.382625ms)
+✔ browser complete is the only success terminal (0.3305ms)
+✔ browser interruption produces a stable failure diagnostic (0.048416ms)
+✔ structured progressive variants replace the MSE placeholder without requiring a separate audio track (0.995583ms)
+✔ unresolved MSE metadata cannot become fetchable presentation metadata (0.2265ms)
+✔ an MSE observation cannot replace an existing structured variant authority (0.224125ms)
+✔ fetchable evidence does not guess between multiple MSE players on one page (0.070375ms)
+✔ audio arriving after a network video and MSE leaves exactly one complete download (0.1355ms)
+✔ MSE arriving after a paired network video does not add a second download (0.061834ms)
+✔ Bilibili tracking changes do not duplicate a video, while another BV or part remains separate (1.054167ms)
+✔ presentation metadata updates only the explicitly resolved media item (0.335417ms)
+✔ presentation metadata never guesses when the resolved media item is absent (0.144708ms)
+✔ an unavailable authoritative poster clears stale thumbnail evidence (0.178333ms)
+✔ player duration can be corrected without clearing an existing cover (0.14625ms)
+✔ progressive fMP4 evidence grows the variant set without regressing on stale observations (0.143833ms)
+✔ HLS children collapse into their master in either arrival order without swallowing another video (3.410209ms)
+✔ paused details report durable Range offsets and full restart cost for a non-Range partial stream (0.830667ms)
+✔ cache checkpoints survive recreation, keep schema and TTL, and merge concurrent range completions (0.8005ms)
+✔ schema validation refuses corrupt or unsupported ledgers (0.141375ms)
+✔ TTL and capacity LRU evict whole input sets while protecting active jobs (0.1505ms)
+✔ content fingerprint changes with validators, size and manifest (4.34725ms)
+✔ session task/progress migration persists once and never resurrects cleared session state (0.959042ms)
+✔ automatic recovery persists paused bytes and deadline across worker suspension and resumes after wake (1.94625ms)
+✔ automatic failures exhaust five increasing delays without losing checkpoints; manual Retry resets the budget (1.129625ms)
+✔ user pause and cancel fence automatic and stale recovery; offline checks cannot retry forever (0.59925ms)
+✔ nontransient failures remain manual and a failure after user cancellation cannot revive the task (0.236875ms)
+✔ going offline during the final automatic attempt remains exhausted after stop or executor restart (1.951042ms)
+✔ DownloadRuntime submits idempotently and derives one-based queue positions from durable jobs (1.307583ms)
+✔ DownloadRuntime persists a claim before emitting a uniquely addressable start command (0.397875ms)
+✔ DownloadRuntime commits the claim before a long-running executor starts (0.143875ms)
+✔ DownloadRuntime recreates around the same store without duplicating an active execution (0.226916ms)
+✔ DownloadRuntime rejects delayed events from a superseded execution without mutating the current attempt (0.651542ms)
+✔ DownloadRuntime requires browser delivery completion before success and keeps terminal history isolated (0.276042ms)
+✔ DownloadRuntime rejects illegal terminal transitions and preserves cancelled queue work (0.171541ms)
+✔ daily scheduling never requeues an active execution, even without inventory (0.266542ms)
+✔ scheduling returns before long executions and starts every available slot (0.349042ms)
+✔ failed attempts can retry and independent requests can download the same URL (1.338791ms)
+✔ Retry preserves the visible byte high water mark while cached ranges are being verified (0.321208ms)
+✔ cancel and clearing a failed task both release retained executor inputs (0.207416ms)
+✔ cancellation holds its slot until the executor has actually stopped (0.180667ms)
+✔ persisted execution snapshots retain selected source, audio pairing and display metadata (0.144708ms)
+✔ delivery resume replaces only the browser copy and rejects the old copy terminal event (0.293959ms)
+✔ resuming an existing artifact still waits for a concurrency slot (0.295167ms)
+✔ restart preserves a generated output and retries only its interrupted browser delivery (0.296334ms)
+✔ source renewal persists the candidate and a pause fences late renewal (0.155333ms)
+✔ queued pause preserves undispatched work and metered pause requires an explicit resume override (0.159791ms)
+✔ parseFmp4InitSegment detects a video track with codec and resolution (0.885959ms)
+✔ parseFmp4InitSegment detects an audio track with codec (0.099709ms)
+✔ clearing a tab also clears its probed URL identity for the next document (9.948917ms)
+✔ a ranged video track is emitted without waiting for a separate audio URL (0.251084ms)
+✔ an unreadable range response remains unclaimed by the fMP4 detector (0.109917ms)
+✔ parsed fMP4 track kind overrides generic CDN content types (0.395666ms)
+✔ a self-contained ranged MP4 is immediately authoritative (0.268083ms)
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1000, hostname: 'cdn.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1001, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1002, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1003, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1004, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1005, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1006, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1007, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1008, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1009, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1010, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1011, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1012, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1013, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1014, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1015, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1016, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1017, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1018, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1019, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1020, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1021, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1022, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1023, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1024, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1025, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1026, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1027, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1028, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1029, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1030, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1031, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1032, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1033, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1034, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1035, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1036, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1037, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1038, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1039, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1040, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] injectHeadersForDownload: added DNR rule { ruleId: 1041, hostname: 'lease.example', headers: '[REDACTED]' }
+[UUGet:download] removeHeadersForDownload: removed DNR rules { ruleIds: [ 1001 ] }
+✔ findCapturedHeaders matches refreshed query parameters within the same tab (0.744167ms)
+✔ findCapturedHeaders does not reuse an exact URL captured by another tab (0.067916ms)
+✔ unplayed Bilibili renditions get public referrer context without borrowing captured credentials (0.183375ms)
+✔ provider referrer fallback rejects unrelated pages, URLs and lookalike domains (0.083833ms)
+✔ headersForDnr excludes browser-generated fetch metadata (0.094916ms)
+✔ injectHeadersForDownload uses a session rule for extension-only tab scope (0.783958ms)
+✔ exact URL grants are isolated, transient grants are bounded and source credentials do not cross origins (2.519709ms)
+✔ identical CDN URLs keep independent tab credentials and tab cleanup preserves the other account (0.096833ms)
+✔ a failed unauthenticated probe cannot replace a successful request context (0.288417ms)
+✔ history append and clear share one writer and do not resurrect cleared records (11.999125ms)
+✔ free quota allows two downloads per UTC day and rejects the third (3.192833ms)
+✔ the free allowance resets on the next UTC day (0.192042ms)
+✔ duplicate authorize for the same key reserves exactly once (0.148292ms)
+✔ a zero-byte failure releases the quota and a retry re-reserves the same key once (0.720958ms)
+✔ failed or cancelled attempts with transferred bytes are committed (0.212375ms)
+✔ credits are reserved only after the free quota is exhausted and released on zero-byte failure (0.19725ms)
+✔ duplicate reports are absorbed without double refunds (0.134584ms)
+✔ unknown download keys never move the ledger (0.099167ms)
+✔ a verified subscription snapshot allows downloads without spending quota or credits (0.176083ms)
+✔ subscription and snapshot helpers implement the documented entitlement windows (0.145625ms)
+✔ remote authorize is authoritative and mirrors free/credits locally (0.202875ms)
+✔ remote 402 surfaces the Worker quota and never reserves locally (0.141334ms)
+✔ an unreachable Worker falls back to the local free quota and marks the status offline (0.198625ms)
+✔ a reachable Worker rejection never falls back to the local quota (0.101916ms)
+✔ remote reports are not queued while Worker failures are queued and settled locally (0.22075ms)
+✔ flushPendingReports drains in order and keeps the failing tail (0.159334ms)
+✔ syncEntitlement mirrors the Worker payload and caches the signed snapshot (0.157167ms)
+✔ checkout, portal and activation return actionable results without throwing (0.200917ms)
+✔ snapshot signatures verify canonical bytes and fail closed on tampering (7.636ms)
+✔ createSnapshotResolver rejects device mismatch, missing keys and records verifiedAt (0.772125ms)
+✔ offline authorize spends signed snapshot credits and caps the free quota (0.33325ms)
+✔ expired or missing snapshots never grant offline credits (0.236458ms)
+✔ offline authorizations queue reservation details and flush them to the Worker (0.198042ms)
+✔ reconcileLocalState commits stale reservations and surfaces the pending backlog (0.156958ms)
+✔ sanitizeLogData removes URL credentials, query parameters, and fragments recursively (0.800416ms)
+✔ sanitizeLogData redacts captured headers and sensitive header-like keys (0.070584ms)
+✔ sanitizeLogData never exposes blob URLs or sensitive Error message URL components (0.081875ms)
+[UUGet:manifest] hls.fetch.start { url: 'https://cdn.example/video/playlist.m3u8' }
+[UUGet:manifest] hls.fetch.invalid_body { url: 'https://cdn.example/video/playlist.m3u8' }
+[UUGet:manifest] hls.parsed {
+  url: 'https://cdn.example/video/playlist.m3u8',
+  variantCount: 2,
+  variants: [
+    {
+      resolution: [Object],
+      bandwidth: 800000,
+      url: 'https://cdn.example/video/640x360/video.m3u8'
+    },
+    {
+      resolution: [Object],
+      bandwidth: 2800000,
+      url: 'https://cdn.example/video/1280x720/video.m3u8'
+    }
+  ],
+  isDrmProtected: false
+}
+[UUGet:manifest] hls.fetch.start { url: 'https://cdn.example/video/playlist.m3u8' }
+[UUGet:manifest] hls.parsed {
+  url: 'https://cdn.example/video/playlist.m3u8',
+  variantCount: 1,
+  variants: [
+    {
+      resolution: undefined,
+      bandwidth: 800000,
+      url: 'https://cdn.example/video/video.m3u8'
+    }
+  ],
+  isDrmProtected: false
+}
+[UUGet:manifest] dash.fetch.start { url: 'https://cdn.example/media/manifest.mpd' }
+[UUGet:manifest] dash.parsed {
+  url: 'https://cdn.example/media/manifest.mpd',
+  representationCount: 2,
+  variantCount: 2,
+  variants: [
+    {
+      resolution: [Object],
+      bandwidth: 4000000,
+      codecs: undefined,
+      url: 'https://cdn.example/media/video/'
+    },
+    {
+      resolution: [Object],
+      bandwidth: 2000000,
+      codecs: undefined,
+      url: 'https://cdn.example/media/video/'
+    }
+  ],
+  isDrmProtected: false
+}
+✔ parseHlsVariants recovers exact child ownership from a page-readable master (11.052708ms)
+✔ parseHlsVariants does not request the page when the extension reads a valid playlist (0.335375ms)
+✔ parseDashVariants resolves representation URLs from an AdaptationSet BaseURL (0.520541ms)
+✔ deriveKind recognises query-string video MIME hints (0.441ms)
+✔ deriveKind recognises query-string audio MIME hints (0.087708ms)
+✔ retains an early response until initial capture state is known (0.662334ms)
+✔ aligns a loading replacement document before assigning its response generation (0.090209ms)
+✔ prepareCapture is the sole authority for admitting a newly observed tab (0.075667ms)
+✔ drops a response when its tab is still outside capture after bootstrap (0.063417ms)
+✔ coalesces byte reports and flushes them before terminal delivery (0.750833ms)
+[UUGet:download] progress.stage {
+  key: 'job-0',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 0,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-1',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 1,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-2',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 2,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-3',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 3,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-4',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 4,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-5',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 5,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-6',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 6,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-7',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 7,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-8',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 8,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-9',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 9,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-10',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 10,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-11',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 11,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-0',
+  from: 'download-video',
+  to: 'success',
+  downloadedBytes: 10,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'job-1',
+  from: 'download-video',
+  to: 'success',
+  downloadedBytes: 20,
+  estimatedBytes: undefined,
+  error: undefined
+}
+✔ concurrent progress, terminal and clear operations preserve unrelated tasks (24.85425ms)
+[UUGet:download] progress.stage {
+  key: 'versioned',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 20,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'versioned',
+  from: 'download-video',
+  to: 'success',
+  downloadedBytes: 20,
+  estimatedBytes: undefined,
+  error: undefined
+}
+✔ late projections cannot regress a newer revision or recreate a cleared record (4.547667ms)
+[UUGet:download] progress.stage {
+  key: 'keep',
+  from: undefined,
+  to: 'download-video',
+  downloadedBytes: 1,
+  estimatedBytes: undefined,
+  error: undefined
+}
+[UUGet:download] progress.stage {
+  key: 'remove',
+  from: undefined,
+  to: 'success',
+  downloadedBytes: 2,
+  estimatedBytes: undefined,
+  error: undefined
+}
+✔ clear reads persisted state even if an old storage event regresses the local cache (21.316167ms)
+✔ resource matching ignores display choices and header order but isolates accounts, tracks and formats (2.43625ms)
+✔ VOD/live classification requires a closed HLS playlist or static DASH MPD (0.483209ms)
+✔ manifest drift clears old progress only with an explicit source-restart diagnostic (1.173334ms)
+✔ processing progress cannot erase the fetched byte count (0.205125ms)
+✔ a live pause request means stop and an interrupted live snapshot never restores as resumable (1.160834ms)
+✔ completed live processing Retry freezes its original manifest and remains valid across pause and restart (1.560875ms)
+✔ a transient live transfer failure never schedules automatic stream resume (0.603167ms)
+✔ expired live processing cache invalidates frozen Retry instead of fetching an obsolete playlist snapshot (0.329792ms)
+✔ source-page binding survives changed tab IDs and never guesses between duplicate or different page URLs (0.358792ms)
+✔ renewal selects one same-path player candidate and rejects ambiguous or unrelated media (0.116292ms)
+✔ renewal detects changed headers and only triggers for expired source status (0.279833ms)
+✔ starts only on first tracking and keeps work running when another tab is tracked (0.819125ms)
+✔ refresh cancels, clears the old generation, then starts the replacement only when ready (0.17575ms)
+✔ duplicate loading and URL notifications advance an untracked tab only once (0.086125ms)
+✔ navigation captures early network requests while old-document cleanup is still pending (0.137208ms)
+✔ content readiness waits for old-document cleanup before starting page work (0.123542ms)
+✔ initial loading activation and navigation share one capture generation (0.082125ms)
+✔ loading activation stays in the same generation even if document work started first (0.084958ms)
+✔ a response after a same-document URL change keeps existing work and detections (0.088417ms)
+✔ a loading response after a same-document URL change does not clear detections (1.230042ms)
+✔ a committed document replacement clears and restarts its generation (0.179125ms)
+✔ a response establishes capture for a background tab document (0.068291ms)
+✔ a response can establish generation zero for a newly loading tab (0.049084ms)
+✔ a response restores page work for a newly tracked tab that already completed (0.05775ms)
+✔ closing a tab cancels its work without starting a replacement (0.091ms)
+✔ coalesces small chunks, flushes seeks and preserves overwritten bytes (0.6685ms)
+✔ discard prevents a cancelled partial range from becoming durable (0.077042ms)
+✔ processing retry reuses a complete immutable input after checking every byte (8.650875ms)
+✔ source change, length change and cache eviction cannot silently reuse a complete input (1.298667ms)
+✔ cancel removes part and init records along with their files (1.682541ms)
+✔ writeAt completes partial writes and preserves random offsets (0.82ms)
+✔ writeAt rejects a stalled write and a quota failure without advancing size (0.280625ms)
+✔ known-size reservations share quota and release on close (0.264209ms)
+✔ assertSuccessfulMux rejects non-zero media processor exit codes (0.496834ms)
+✔ assertNonEmptyOutput rejects empty output files (0.070625ms)
+✔ output proof survives a fresh worker and preserves the passthrough input identity (7.676583ms)
+✔ output restore rejects mutation, truncation, wrong owner, expiry and metadata changes (23.526083ms)
+✔ failed acknowledgement or cancellation cannot publish an output (2.579125ms)
+✔ legacy completed ranges without full durable checksum coverage cannot silently reuse bytes (0.678167ms)
+✔ a real reset after 1.5 MiB retries from the flushed 1 MiB checkpoint and reproduces every byte (693.91625ms)
+✔ Last-Modified and validator-free resumes require successful remote boundary samples (6.217167ms)
+✔ local mutation and remote sample mismatch reject retained bytes before any new write (4.156209ms)
+✔ checkpoint storage failure stops transfer at the first frame instead of fetching uncheckpointed payload (1.137416ms)
+✔ resume requires matching resource identity, range layout and retained file bytes (0.98ms)
+✔ persisted range records validate indices and recover only completed intervals (0.2405ms)
+✔ expectedResponseBytes accepts only a valid non-negative Content-Length (8.91125ms)
+✔ assertCompleteResponse rejects empty and truncated bodies when Content-Length is declared (0.274208ms)
+✔ assertSuccessfulResponse rejects representative HTTP failures and permits ranges (0.178834ms)
+✔ Range validation rejects ignored ranges, wrong offsets, changed totals and truncated data (2.922792ms)
+✔ etag segment byte-range resumes at its internal 1 MiB checkpoint after a fresh worker (115.197459ms)
+✔ date segment byte-range resumes at its internal 1 MiB checkpoint after a fresh worker (121.747666ms)
+✔ none segment byte-range resumes at its internal 1 MiB checkpoint after a fresh worker (129.936208ms)
+✔ segment identity or cached hash mutation cannot append to a retained partial segment (215.7695ms)
+✔ a non-Range segment explicitly selects atomic whole-segment transport (52.881ms)
+[UUGet:download] worker.ranges.start {
+  url: 'http://127.0.0.1:55421/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'persistent-403',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 4,
+  estimatedBytes: 8,
+  lastReceivedAt: 1794975068137,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 4, lastWriteAt: 1794975068133 }
+}
+[UUGet:download] worker.ranges.failed {
+  url: 'http://127.0.0.1:55421/video',
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 403: http://127.0.0.1:55421/video'
+  }
+}
+[UUGet:download] worker.ranges.start {
+  url: 'http://127.0.0.1:55421/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'persistent-403',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 8,
+  estimatedBytes: 8,
+  lastReceivedAt: 1794975068153,
+  completedParts: 2,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 4, lastWriteAt: 1794975068152 }
+}
+[UUGet:download] worker.ranges.done { url: 'http://127.0.0.1:55421/video', totalBytes: 8 }
+✔ local HTTP persistent 403 at 50% retains the first range and Retry fetches only the missing range (53.494958ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'partial-segments',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 1,
+  estimatedBytes: 2,
+  lastReceivedAt: 1794975068158,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 1, lastWriteAt: 1794975068158 }
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'partial-segments',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 1,
+  estimatedBytes: 2,
+  lastReceivedAt: 1794975068165,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 1, lastWriteAt: 1794975068165 }
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'partial-segments',
+  stage: 'download-video',
+  activity: 'verifying',
+  downloadedBytes: 2,
+  estimatedBytes: 2,
+  lastReceivedAt: 1794975068182,
+  completedParts: 2,
+  totalParts: 2,
+  disk: undefined
+}
+✔ segments retain atomic completed parts across failure and reuse the complete input without media requests (50.740833ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'segment-paused',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 3145728,
+  estimatedBytes: 3145728,
+  lastReceivedAt: 1794975068227,
+  completedParts: 1,
+  totalParts: 1,
+  disk: { writeCalls: 3, bytesWritten: 3145728, lastWriteAt: 1794975068227 }
+}
+✔ segment pause cleanup retains its acknowledged internal checkpoint and Retry appends from 1 MiB (31.347083ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'encrypted-checkpoint',
+  stage: 'download-video',
+  activity: 'retrying',
+  downloadedBytes: 1572864,
+  estimatedBytes: undefined,
+  lastReceivedAt: 1794975068744,
+  completedParts: 0,
+  totalParts: 1,
+  disk: { writeCalls: 0, bytesWritten: 0, lastWriteAt: 0 }
+}
+[UUGet:download] worker.ranges.start {
+  url: 'https://source.test/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+[UUGet:download] worker.ranges.failed {
+  url: 'https://source.test/video',
+  error: {
+    name: 'DownloadFailure',
+    message: 'Invalid Range response: expected bytes 0-3/8'
+  }
+}
+[UUGet:download] worker.ranges.start {
+  url: 'https://source.test/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+✔ AES-128 checkpoints ciphertext across a reset and publishes only complete decrypted plaintext (524.722792ms)
+✔ worker rejects an ignored Range before writing any bytes and aborts siblings (0.89025ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'pause-range',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 4,
+  estimatedBytes: 8,
+  lastReceivedAt: 1794975068763,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 4, lastWriteAt: 1794975068762 }
+}
+[UUGet:download] worker.ranges.failed {
+  url: 'https://source.test/video',
+  error: { name: 'AbortError', message: 'Download cancelled' }
+}
+[UUGet:download] worker.ranges.start {
+  url: 'https://source.test/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'pause-range',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 8,
+  estimatedBytes: 8,
+  lastReceivedAt: 1794975068764,
+  completedParts: 2,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 4, lastWriteAt: 1794975068764 }
+}
+[UUGet:download] worker.ranges.done { url: 'https://source.test/video', totalBytes: 8 }
+✔ worker resumes only completed ranges from the retained file with the same strong ETag (2.204042ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'hls-window',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 7,
+  estimatedBytes: 30,
+  lastReceivedAt: 1794975068767,
+  completedParts: 1,
+  totalParts: 30,
+  disk: { writeCalls: 0, bytesWritten: 0, lastWriteAt: 0 }
+}
+[UUGet:download] worker.ranges.start {
+  url: 'https://source.test/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+✔ HLS dispatch applies backpressure and assembles staged parts in source order (47.247667ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'bodyless.bin',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 4,
+  estimatedBytes: 8,
+  lastReceivedAt: 1794975068812,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 4, lastWriteAt: 1794975068812 }
+}
+[UUGet:download] worker.ranges.failed {
+  url: 'https://source.test/video',
+  error: { name: 'DownloadFailure', message: 'Range response has no body' }
+}
+[UUGet:download] worker.ranges.start {
+  url: 'https://source.test/video',
+  jobKey: '[invalid-url]',
+  rangeCount: 2,
+  totalBytes: 8,
+  headerNames: []
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'truncated.bin',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 4,
+  estimatedBytes: 8,
+  lastReceivedAt: 1794975068813,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 1, bytesWritten: 4, lastWriteAt: 1794975068813 }
+}
+[UUGet:download] worker.ranges.failed {
+  url: 'https://source.test/video',
+  error: {
+    name: 'DownloadFailure',
+    message: 'Range body length mismatch: expected 4, received 2'
+  }
+}
+✔ worker rejects a bodyless or truncated range even when other parts reach the final file size (1.822167ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'hls-ranges',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 6,
+  estimatedBytes: 6,
+  lastReceivedAt: 1794975068815,
+  completedParts: 1,
+  totalParts: 2,
+  disk: { writeCalls: 2, bytesWritten: 5, lastWriteAt: 1794975068815 }
+}
+[UUGet:download] worker.stream.start {
+  url: 'https://source.test/stalled',
+  jobKey: '[invalid-url]',
+  headerNames: []
+}
+[UUGet:download] worker.stream.failed {
+  url: 'https://source.test/stalled',
+  error: {
+    name: 'Error',
+    message: 'Download stalled: no data for 30 seconds'
+  }
+}
+[UUGet:download] worker.stream.start {
+  url: 'https://source.test/stalled',
+  jobKey: '[invalid-url]',
+  headerNames: []
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'idle-body',
+  stage: 'download-audio',
+  activity: undefined,
+  downloadedBytes: 2,
+  estimatedBytes: 3,
+  lastReceivedAt: 29000,
+  completedParts: undefined,
+  totalParts: undefined,
+  disk: { writeCalls: 0, bytesWritten: 0, lastWriteAt: 0 }
+}
+[UUGet:download] worker.stream.failed {
+  url: 'https://source.test/stalled',
+  error: {
+    name: 'Error',
+    message: 'Download stalled: no data for 30 seconds'
+  }
+}
+✔ HLS range parts validate their intervals and assemble only the requested bytes (2.866292ms)
+✔ stream download fails after 30 seconds without response headers (0.8945ms)
+✔ stream idle timeout resets on received bytes and bounds a stalled response body (0.509084ms)
+[UUGet:download] worker.download.snapshot {
+  key: 'budget-a',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 8,
+  estimatedBytes: 12,
+  lastReceivedAt: 1794975068841,
+  completedParts: 1,
+  totalParts: 12,
+  disk: { writeCalls: 1, bytesWritten: 1, lastWriteAt: 1794975068841 }
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'budget-b',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 4,
+  estimatedBytes: 12,
+  lastReceivedAt: 1794975068843,
+  completedParts: 1,
+  totalParts: 12,
+  disk: { writeCalls: 1, bytesWritten: 1, lastWriteAt: 1794975068843 }
+}
+[UUGet:download] worker.download.snapshot {
+  key: 'budget-c',
+  stage: 'download-video',
+  activity: 'receiving',
+  downloadedBytes: 4,
+  estimatedBytes: 12,
+  lastReceivedAt: 1794975068843,
+  completedParts: 1,
+  totalParts: 12,
+  disk: { writeCalls: 1, bytesWritten: 1, lastWriteAt: 1794975068843 }
+}
+✔ three HLS jobs share eight data connections and preserve each file order (43.010417ms)
+✔ delayed cleanup removes an output exactly once and duplicate messages are harmless (0.641417ms)
+✔ native interruption revokes the old blob while retaining the verified file (0.091ms)
+✔ transport and processing failures retain input; integrity failures and cancel discard it (0.437792ms)
+✔ live transport failure explains discarded snapshot data and never promises cached stream resume (0.102958ms)
+✔ offscreen inventory fences replays and retains results when the background is unavailable (9.050208ms)
+✔ cancel intent survives a stop before asynchronous execution starts (2.155417ms)
+✔ an immediate failure carries the final checkpoint even when progress publication was coalesced (2.4955ms)
+✔ retries an unacknowledged terminal report without re-executing the download (0.673ms)
+[UUGet:download] hls.playlist.failed {
+  url: 'https://cdn.example/audio.m3u8',
+  attempt: 1,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 404: https://cdn.example/audio.m3u8'
+  }
+}
+✔ master pairs each quality with its declared audio group and owns all renditions (0.571916ms)
+✔ in-band audio and combined playlists require no separate input (0.3145ms)
+✔ download resolution retains and authorizes the paired audio playlist (8.631834ms)
+✔ missing external audio fails resolution instead of delivering a silent video (1.269125ms)
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 1,
+  error: {
+    name: 'Error',
+    message: 'Failed to fetch HLS playlist: 401. Refresh the video page and retry.'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 1,
+  error: {
+    name: 'Error',
+    message: 'Failed to fetch HLS playlist: 403. Refresh the video page and retry.'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 1,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 404: https://fixture.invalid/playlist.m3u8'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 1,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 416: https://fixture.invalid/playlist.m3u8'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 1,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 500: https://fixture.invalid/playlist.m3u8'
+  }
+}
+✔ headersForFetch excludes browser-controlled headers case-insensitively (1.454458ms)
+✔ fetchResolvedHlsPlaylist preserves headers and authorizes a cross-origin variant before fetching it (21.247791ms)
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 2,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 500: https://fixture.invalid/playlist.m3u8'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 3,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 500: https://fixture.invalid/playlist.m3u8'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 1,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 503: https://fixture.invalid/playlist.m3u8'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 2,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 503: https://fixture.invalid/playlist.m3u8'
+  }
+}
+[UUGet:download] hls.playlist.failed {
+  url: 'https://fixture.invalid/playlist.m3u8',
+  attempt: 3,
+  error: {
+    name: 'HttpRequestError',
+    message: 'HTTP 503: https://fixture.invalid/playlist.m3u8'
+  }
+}
+✔ fetchResolvedHlsPlaylist propagates representative HTTP failures before parsing (3016.102583ms)
+✔ fetchResolvedHlsPlaylist rejects DRM before descriptor planning (0.880834ms)
+✔ validator selection keeps strong ETag priority and uses dates or boundary sampling for weak sources (62.843542ms)
+✔ completed HTTP identity survives dictionary order and header case without sharing credentials (0.1695ms)
+✔ HLS ranges retain initialization offsets, explicit offsets and implicit same-resource offsets (0.822042ms)
+✔ HLS sequence identity rejects malformed, negative and unsafe segment indices (0.261542ms)
+✔ HLS implicit offsets require a prior range of the same resource (0.08875ms)
+✔ bounded byte probe identifies H.264 and HEVC MPEG-TS from PMT facts (10.300125ms)
+✔ bounded byte probe identifies MP4 and WebM tracks without URL hints (14.316709ms)
+✔ bounded MP4 probe recognises AV1 sample entries (0.147167ms)
+✔ unknown bytes remain unknown (0.061792ms)
+✔ HLS descriptor probes the first segment when codecs are undeclared (13.570958ms)
+✔ HLS descriptor rejects probe bodies above the fixed byte budget (0.417667ms)
+✔ unknown-length media probes cancel at the byte budget without buffering the full response (0.516792ms)
+✔ capabilities match the web-media-remux binary contract (0.634083ms)
+✔ plans H.264 and HEVC MPEG-TS HLS as stream-copy MP4 (0.189959ms)
+✔ plans fMP4 HLS, DASH, direct MP4, separate tracks, and WebM deterministically (0.113958ms)
+✔ MP3 is the only transcode plan and requires a decodable audio track (0.078791ms)
+✔ rejects DRM, unknown codecs, unsupported containers, and missing video before execution (0.073667ms)
+✔ builds FFmpeg arguments only from an executable plan (0.102458ms)
+✔ normalizes declared codec strings without inferring unknown values (0.114167ms)
+✔ metered policy uses reported connection type or data-saving preference, never throughput as cellular proof (0.579625ms)
+✔ cross-origin byte requests retain their Range controls while source credentials stay scoped (10.83525ms)
+✔ automatic retry is limited to transient transport errors and preserves worker classification (2.471667ms)
+✔ cancel interrupts transport backoff before its timer expires (0.983667ms)
+✔ startup GC recovers outputs whose cleanup message was lost (0.786458ms)
+✔ expired output files are collected while shared immutable inputs retain their original lease (1.735833ms)
+✔ resumable OPFS names are stable, bounded and do not alias punctuation in request IDs (5.245583ms)
+✔ validates stream-copied AV1 and AAC MP4 output (1.325875ms)
+✔ validates MP4 container, required tracks, codecs, and duration (7.411584ms)
+✔ validates fragmented MP4 concatenation and DASH remux outputs (24.40625ms)
+✔ validates WebM and MP3 output structures (23.359125ms)
+✔ rejects truncated output and missing required tracks (19.630917ms)
+✔ cancel during real output metadata validation prevents a later artifact hash dispatch or Blob publication (5.7105ms)
+✔ an already cancelled saved-output restore never opens storage or dispatches a worker (0.152125ms)
+✔ worker termination rejects and clears every pending RPC category (1.576834ms)
+[UUGet:download] http.probe.response {
+  url: 'https://example.test/video',
+  status: 200,
+  contentType: 'video/mp4',
+  contentLength: '9999999999',
+  contentRange: undefined
+}
+✔ range probe cancels a full response without buffering its body (10.017458ms)
+✔ retained strong-validator checkpoints use HEAD and expose changed identity without downloading cached media (0.482333ms)
+✔ HTTP failure during checkpoint validation does not become a streaming fallback (0.279417ms)
+✔ rotates jobs under contention and never exceeds its budget (0.657917ms)
+✔ cancelled queued work releases no extra slot (0.636333ms)
+✔ cache explicitly requests persistent storage and reports a browser refusal without blocking downloads (0.660125ms)
+✔ cancel while reading connection settings prevents a later worker dispatch (5.365792ms)
+ℹ tests 226
+ℹ suites 0
+ℹ pass 226
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3909.661333

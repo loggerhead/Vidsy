@@ -1,6 +1,6 @@
 {
   "name": "uuget",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "UUGet — Video Downloader. Find videos on the web. Save them in one click.",
   "private": true,
   "type": "module",
@@ -31,7 +31,9 @@
     "wxt:prepare": "wxt prepare",
     "wxt:build": "pnpm build",
     "wxt:zip": "pnpm zip",
-    "postinstall": "pnpm copy-env && wxt prepare"
+    "postinstall": "pnpm copy-env && wxt prepare",
+    "build:site": "node scripts/build-site.mjs",
+    "deploy:site": "node scripts/build-site.mjs && pnpm -C server exec wrangler pages deploy ../site --project-name uuget-site --branch main --commit-dirty=true"
   },
   "dependencies": {
     "react": "^19.1.0",

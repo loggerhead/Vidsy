@@ -1,4 +1,5 @@
 import type { MediaItem, MediaVariant } from './media.js';
+import type { FreeQuota, SubscriptionSummary, UpgradeOptions } from '../license/types.js';
 
 const sanitizeFileNamePart = (s: string): string =>
   s
@@ -6,7 +7,19 @@ const sanitizeFileNamePart = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-type DownloadState = { busyUrl: string | null; error: string | null };
+/** Entitlement details attached to a 402 response for the shared paywall. */
+type DownloadPaywallState = {
+  free: FreeQuota;
+  credits: number;
+  subscription: SubscriptionSummary;
+  upgrade?: UpgradeOptions;
+};
+
+type DownloadState = {
+  busyUrl: string | null;
+  error: string | null;
+  paywall?: DownloadPaywallState | null;
+};
 
 // Badge answers "how is this delivered?" (HTTP / HLS / DASH / MSS / MSE) rather
 // than "what container?". Container is irrelevant since the downloader always
@@ -265,4 +278,4 @@ export {
   variantLabel,
   variantOptionLabel,
 };
-export type { DownloadState, FilenameTemplateContext };
+export type { DownloadState, DownloadPaywallState, FilenameTemplateContext };

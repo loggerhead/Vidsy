@@ -24,6 +24,9 @@ jobs:
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Build + zip
+        env:
+          WXT_SNAPSHOT_PUBLIC_KEY: ${{ vars.WXT_SNAPSHOT_PUBLIC_KEY }}
+          VITE_SNAPSHOT_PUBLIC_KEY: ${{ vars.VITE_SNAPSHOT_PUBLIC_KEY }}
         run: pnpm zip
 
       - name: Resolve zip path

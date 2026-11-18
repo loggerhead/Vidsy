@@ -1,0 +1,21 @@
+
+> @extension/billing-worker@1.1.0 test /Users/bytedance/my-projects/Vidsy/server
+> vitest run
+
+
+=======================================================================================
+WARNING: @cloudflare/vitest-pool-workers has been renamed to @cloudflare/vitest-plugin.
+This package will not receive future updates.
+Run `npx @cloudflare/codemods vitest:pool-workers-to-vitest-plugin` to migrate.
+=======================================================================================
+
+
+ RUN  v4.1.12 /Users/bytedance/my-projects/Vidsy/server
+
+ ✓ test/billing.test.ts (20 tests) 164ms
+
+ Test Files  1 passed (1)
+      Tests  20 passed (20)
+   Start at  11:21:59
+   Duration  790ms (transform 66ms, setup 131ms, import 10ms, tests 164ms, environment 0ms)
+

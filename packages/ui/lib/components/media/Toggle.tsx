@@ -1,6 +1,14 @@
 import { cn } from '../../utils';
 
-export const Toggle = ({ checked, onChange, isLight }: { checked: boolean; onChange: () => void; isLight?: boolean }) => (
+export const Toggle = ({
+  checked,
+  onChange,
+  isLight,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  isLight?: boolean;
+}) => (
   <button
     onClick={onChange}
     className={cn(

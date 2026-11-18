@@ -22,6 +22,7 @@ import {
   cleanupStaleDnrRules,
 } from './header-capture';
 import { addHistoryEntry } from './history';
+import { PaymentRequiredError } from './license';
 import { createId, deriveKind, deriveFileName, sanitizeFileName } from './media-utils';
 import { updateProgress } from './progress';
 import { createProgressPublisher } from './progress-publisher';
@@ -552,7 +553,21 @@ const handleDownload = async (payload: DownloadPayload) => {
         fileName: payload.fileName,
         tabId: payload.tabId,
       };
-  return serializeEvent(async () => ({ ok: true, queued: true, ...(await enqueueDownload(payload, item)) }));
+  try {
+    return await serializeEvent(async () => ({ ok: true, queued: true, ...(await enqueueDownload(payload, item)) }));
+  } catch (error) {
+    if (error instanceof PaymentRequiredError)
+      return {
+        ok: false,
+        code: 'PAYMENT_REQUIRED' as const,
+        error: error.message,
+        free: error.verdict.free,
+        credits: error.verdict.credits,
+        subscription: error.verdict.subscription,
+        upgrade: error.verdict.upgrade,
+      };
+    throw error;
+  }
 };
 const againDownload = (key: string, requestId: string) => serializeEvent(() => resubmitDownload(key, requestId));
 const pauseDownload = (key: string) => serializeEvent(() => commandDownload(key, { type: 'pause' }));

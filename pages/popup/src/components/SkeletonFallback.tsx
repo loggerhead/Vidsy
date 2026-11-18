@@ -1,5 +1,4 @@
-import { cn } from '@extension/ui';
-import { SkeletonCard, Skeleton } from '@extension/ui';
+import { cn, SkeletonCard, Skeleton } from '@extension/ui';
 
 export const SkeletonFallback = () => {
   const isLight = false; // default to dark during initial load

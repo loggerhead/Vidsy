@@ -1,0 +1,12 @@
+== register dev_kill-1794980109 ==
+{"ok":true}
+status=200
+== quota exhausted, enforcement on: authorize ==
+{"allowed":false,"error":"payment_required","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null,"upgrade":{"optionsUrl":"chrome-extension://<store-id>/options.html#license","pricingUrl":"https://uu0uu.com/pricing"}}
+status=402
+== enforcement off: authorize ==
+{"allowed":true,"source":"free","authorizationId":"auth_2af77942-2d28-4af7-a3b6-8f304c9f0d59","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null}
+status=200
+== enforcement restored: authorize ==
+{"allowed":false,"error":"payment_required","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null,"upgrade":{"optionsUrl":"chrome-extension://<store-id>/options.html#license","pricingUrl":"https://uu0uu.com/pricing"}}
+status=402

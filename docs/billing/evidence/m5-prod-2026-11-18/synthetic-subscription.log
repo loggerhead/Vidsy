@@ -1,0 +1,21 @@
+== register ==
+{"ok":true}
+status=200
+== checkout ==
+{"ok":true}
+status=200
+== entitlement after checkout ==
+{"ok":true,"plan":"pro","free":{"used":0,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":{"status":"active","currentPeriodEnd":1797572040079},"snapshot":{"v":1,"deviceId":"dev_sub-1794980040079","plan":"pro","subscriptionStatus":"active","subscriptionEnd":1797572040079,"creditBalance":0,"freeUsed":0,"utcDay":"2026-11-18","issuedAt":1794980051458,"expiresAt":1795239251458},"signature":"S3d2iqzlZwttHTVAdWiFZEoLFYp/e2nhX0hxkovhScTi0FWr4Mc6jqx+3E62aVq5K0lOGAxmBsG6tzjZnYmvbg==","keyId":"uuget-2026-11"}
+status=200
+== cancel ==
+{"ok":true}
+status=200
+== entitlement after cancel ==
+{"ok":true,"plan":"pro","free":{"used":0,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":{"status":"scheduled_cancel","currentPeriodEnd":1797572040079},"snapshot":{"v":1,"deviceId":"dev_sub-1794980040079","plan":"pro","subscriptionStatus":"scheduled_cancel","subscriptionEnd":1797572040079,"creditBalance":0,"freeUsed":0,"utcDay":"2026-11-18","issuedAt":1794980055937,"expiresAt":1795239255937},"signature":"K+R/M9XZUtRPVas2ign4PMGmGyEOB6j4GJ6reFdSFAzuzKSwuldbMdNhIfIawmgaRlfBUN4PMTrS2gPF1WxE1w==","keyId":"uuget-2026-11"}
+status=200
+== expired ==
+{"ok":true}
+status=200
+== entitlement after expired ==
+{"ok":true,"plan":"free","free":{"used":0,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":{"status":"expired","currentPeriodEnd":1797572040079},"snapshot":{"v":1,"deviceId":"dev_sub-1794980040079","plan":"free","subscriptionStatus":"expired","subscriptionEnd":1797572040079,"creditBalance":0,"freeUsed":0,"utcDay":"2026-11-18","issuedAt":1794980059477,"expiresAt":1795239259477},"signature":"NS5ZIb/FvFx350DJQGGTrqiOGeL+orR7sZVqNOLptwSZq6qbCAxMMfC1KetEV1sSGnZSZm5Svbafs4iVqdtlLw==","keyId":"uuget-2026-11"}
+status=200

@@ -1,0 +1,104 @@
+
+> uuget@1.1.0 type-check /Users/bytedance/my-projects/Vidsy
+> turbo type-check
+
+turbo 2.5.6
+
+• Packages in scope: @extension/billing-worker, @extension/content-runtime-script, @extension/content-script, @extension/content-ui, @extension/dev-utils, @extension/devtools, @extension/devtools-panel, @extension/e2e, @extension/env, @extension/hmr, @extension/i18n, @extension/new-tab, @extension/options, @extension/popup, @extension/shared, @extension/sidepanel, @extension/storage, @extension/tailwindcss-config, @extension/tsconfig, @extension/ui, @extension/vite-config, chrome-extension
+• Running type-check in 22 packages
+• Remote caching disabled
+chrome-extension:type-check: cache bypass, force executing 5dff6b528629278f
+@extension/content-script:type-check: cache bypass, force executing 17b84cc9e08e7777
+@extension/options:type-check: cache bypass, force executing cd1469dd2fe6a8a4
+@extension/i18n:type-check: cache bypass, force executing ce5b8a6161401b91
+@extension/shared:type-check: cache bypass, force executing 36e8ec69fd725e70
+@extension/content-runtime-script:type-check: cache bypass, force executing f99b83f3a6e4643f
+@extension/popup:type-check: cache bypass, force executing 401ff15a03bd5fba
+@extension/ui:type-check: cache bypass, force executing 2594c6873d0ce0a5
+@extension/devtools-panel:type-check: cache bypass, force executing ac311c67432537f5
+@extension/new-tab:type-check: cache bypass, force executing cd477ef9f1a204d1
+@extension/billing-worker:type-check: cache bypass, force executing f6126e87c462f950
+@extension/devtools:type-check: cache bypass, force executing 9046f352887a245e
+chrome-extension:type-check: 
+chrome-extension:type-check: > chrome-extension@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/chrome-extension
+chrome-extension:type-check: > tsc --noEmit
+chrome-extension:type-check: 
+@extension/content-script:type-check: 
+@extension/content-script:type-check: > @extension/content-script@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/content
+@extension/content-script:type-check: > tsc --noEmit
+@extension/content-script:type-check: 
+@extension/options:type-check: 
+@extension/options:type-check: > @extension/options@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/options
+@extension/options:type-check: > tsc --noEmit
+@extension/options:type-check: 
+@extension/popup:type-check: 
+@extension/popup:type-check: > @extension/popup@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/popup
+@extension/popup:type-check: > tsc --noEmit
+@extension/popup:type-check: 
+@extension/i18n:type-check: 
+@extension/i18n:type-check: > @extension/i18n@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/i18n
+@extension/i18n:type-check: > tsc --noEmit
+@extension/i18n:type-check: 
+@extension/content-runtime-script:type-check: 
+@extension/content-runtime-script:type-check: > @extension/content-runtime-script@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/content-runtime
+@extension/content-runtime-script:type-check: > tsc --noEmit
+@extension/content-runtime-script:type-check: 
+@extension/shared:type-check: 
+@extension/shared:type-check: > @extension/shared@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/shared
+@extension/shared:type-check: > tsc --noEmit
+@extension/shared:type-check: 
+@extension/ui:type-check: 
+@extension/ui:type-check: > @extension/ui@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/ui
+@extension/ui:type-check: > tsc --noEmit
+@extension/ui:type-check: 
+@extension/new-tab:type-check: 
+@extension/new-tab:type-check: > @extension/new-tab@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/new-tab
+@extension/new-tab:type-check: > tsc --noEmit
+@extension/new-tab:type-check: 
+@extension/devtools:type-check: 
+@extension/devtools:type-check: > @extension/devtools@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/devtools
+@extension/devtools:type-check: > tsc --noEmit
+@extension/devtools:type-check: 
+@extension/devtools-panel:type-check: 
+@extension/devtools-panel:type-check: > @extension/devtools-panel@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/devtools-panel
+@extension/devtools-panel:type-check: > tsc --noEmit
+@extension/devtools-panel:type-check: 
+@extension/billing-worker:type-check: 
+@extension/billing-worker:type-check: > @extension/billing-worker@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/server
+@extension/billing-worker:type-check: > tsc --noEmit
+@extension/billing-worker:type-check: 
+@extension/hmr:type-check: cache bypass, force executing 1fa1e1f66a31636b
+@extension/sidepanel:type-check: cache bypass, force executing 67c41304e146d363
+@extension/storage:type-check: cache bypass, force executing 5b308f4f587275f9
+@extension/dev-utils:type-check: cache bypass, force executing 9bf879612e35ce20
+@extension/env:type-check: cache bypass, force executing 61bce9b9bd7b32c1
+@extension/content-ui:type-check: cache bypass, force executing 948568d27c06b21e
+@extension/hmr:type-check: 
+@extension/hmr:type-check: > @extension/hmr@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/hmr
+@extension/hmr:type-check: > tsc --noEmit
+@extension/hmr:type-check: 
+@extension/sidepanel:type-check: 
+@extension/sidepanel:type-check: > @extension/sidepanel@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/side-panel
+@extension/sidepanel:type-check: > tsc --noEmit
+@extension/sidepanel:type-check: 
+@extension/storage:type-check: 
+@extension/storage:type-check: > @extension/storage@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/storage
+@extension/storage:type-check: > tsc --noEmit
+@extension/storage:type-check: 
+@extension/dev-utils:type-check: 
+@extension/dev-utils:type-check: > @extension/dev-utils@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/dev-utils
+@extension/dev-utils:type-check: > tsc --noEmit
+@extension/dev-utils:type-check: 
+@extension/env:type-check: 
+@extension/env:type-check: > @extension/env@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/env
+@extension/env:type-check: > tsc --noEmit
+@extension/env:type-check: 
+@extension/content-ui:type-check: 
+@extension/content-ui:type-check: > @extension/content-ui@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/content-ui
+@extension/content-ui:type-check: > tsc --noEmit
+@extension/content-ui:type-check: 
+
+ Tasks:    18 successful, 18 total
+Cached:    0 cached, 18 total
+  Time:    5.976s 
+

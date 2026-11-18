@@ -28,5 +28,170 @@
   "hello": {
     "description": "Placeholder example",
     "message": "Hello $1"
+  },
+  "paywallTitle": {
+    "message": "You've used today's free downloads"
+  },
+  "paywallBody": {
+    "message": "Buy a credit pack for occasional downloads, or go Pro for unlimited downloads."
+  },
+  "paywallFreeUsed": {
+    "message": "free downloads used today"
+  },
+  "paywallCreditsTitle": {
+    "message": "Credit packs"
+  },
+  "paywallCreditsUnit": {
+    "message": "credits"
+  },
+  "paywallProTitle": {
+    "message": "UUGet Pro"
+  },
+  "paywallProBody": {
+    "message": "Unlimited downloads while your subscription is active."
+  },
+  "paywallProMonthly": {
+    "message": "Monthly"
+  },
+  "paywallProYearly": {
+    "message": "Yearly"
+  },
+  "paywallManage": {
+    "message": "Manage subscription"
+  },
+  "paywallRestore": {
+    "message": "Restore purchase"
+  },
+  "paywallPrivacy": {
+    "message": "Privacy"
+  },
+  "paywallTerms": {
+    "message": "Terms"
+  },
+  "paywallRefund": {
+    "message": "Refunds"
+  },
+  "paywallClose": {
+    "message": "Close"
+  },
+  "paywallWaiting": {
+    "message": "Waiting for payment…"
+  },
+  "licenseTitle": {
+    "message": "License"
+  },
+  "licenseSubtitle": {
+    "message": "Manage your free quota, credits and Pro subscription."
+  },
+  "licensePlanFree": {
+    "message": "Free plan"
+  },
+  "licensePlanPro": {
+    "message": "Pro plan"
+  },
+  "licenseOffline": {
+    "message": "Offline — showing last synced state"
+  },
+  "licenseDevice": {
+    "message": "Device"
+  },
+  "licenseRefresh": {
+    "message": "Refresh"
+  },
+  "licenseRefreshing": {
+    "message": "Refreshing…"
+  },
+  "licenseFreeToday": {
+    "message": "Free today"
+  },
+  "licenseCredits": {
+    "message": "Credits"
+  },
+  "licenseSubscription": {
+    "message": "Subscription"
+  },
+  "licenseStatusNone": {
+    "message": "None"
+  },
+  "licenseStatusActive": {
+    "message": "Active"
+  },
+  "licenseStatusTrialing": {
+    "message": "Trialing"
+  },
+  "licenseStatusScheduledCancel": {
+    "message": "Cancels at period end"
+  },
+  "licenseStatusCanceled": {
+    "message": "Canceled"
+  },
+  "licenseStatusExpired": {
+    "message": "Expired"
+  },
+  "licenseStatusPaused": {
+    "message": "Paused"
+  },
+  "licensePendingReports": {
+    "message": "download reports waiting to sync"
+  },
+  "licenseManage": {
+    "message": "Manage subscription"
+  },
+  "licenseBuyCreditsTitle": {
+    "message": "Buy credits"
+  },
+  "licenseBuyProTitle": {
+    "message": "Go Pro"
+  },
+  "licenseBuy": {
+    "message": "Buy"
+  },
+  "licenseProMonthly": {
+    "message": "Pro monthly"
+  },
+  "licenseProYearly": {
+    "message": "Pro yearly"
+  },
+  "licenseRestoreTitle": {
+    "message": "Restore purchase"
+  },
+  "licenseRestoreBody": {
+    "message": "Paste the license key from your Creem purchase email."
+  },
+  "licenseKeyPlaceholder": {
+    "message": "XXXX-XXXX-XXXX"
+  },
+  "licenseActivate": {
+    "message": "Activate"
+  },
+  "licenseRestoreHint": {
+    "message": "A license key covers up to 3 devices. Deactivate an old device in the Creem customer portal before activating a new one."
+  },
+  "licenseActivating": {
+    "message": "Activating…"
+  },
+  "licenseActivated": {
+    "message": "License activated. Entitlements refreshed."
+  },
+  "licenseWaitingPayment": {
+    "message": "Waiting for payment… this page refreshes automatically."
+  },
+  "licensePurchaseDetected": {
+    "message": "Purchase detected. Entitlements updated."
+  },
+  "licenseLoading": {
+    "message": "Loading license status…"
+  },
+  "licensePrivacy": {
+    "message": "Privacy"
+  },
+  "licenseTerms": {
+    "message": "Terms"
+  },
+  "licenseRefund": {
+    "message": "Refunds"
+  },
+  "licenseActionFailed": {
+    "message": "Something went wrong. Try again."
   }
 }

@@ -1,0 +1,50 @@
+# wrangler dev --local smoke test (2026-11-18T03:22:25Z)
+
+## GET /health
+{"ok":true,"service":"uuget-billing","environment":"development","version":"1.1.0"}
+HTTP 200
+
+## POST /v1/devices/register
+{"ok":true}
+HTTP 200
+
+## GET /v1/entitlement (fresh)
+{"ok":true,"plan":"free","free":{"used":0,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null,"snapshot":{"v":1,"deviceId":"dev_smoke-0000-0000-0000-000000000001","plan":"free","subscriptionStatus":"none","subscriptionEnd":null,"creditBalance":0,"freeUsed":0,"utcDay":"2026-11-18","issuedAt":1794972145157,"expiresAt":1795231345157},"signature":null,"keyId":null}
+HTTP 200
+
+## POST /v1/download/authorize #1
+{"allowed":true,"source":"free","authorizationId":"auth_533ed10f-1824-4dbd-a66c-4b4f2939ce97","free":{"used":1,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null}
+HTTP 200
+
+## POST /v1/download/authorize #2
+{"allowed":true,"source":"free","authorizationId":"auth_d5f9e59f-93bb-4a40-bd2f-14e8b4af703a","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null}
+HTTP 200
+
+## POST /v1/download/authorize #3 (expect 402)
+{"allowed":false,"error":"payment_required","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null,"upgrade":{"optionsUrl":"chrome-extension://<store-id>/options.html#license","pricingUrl":"https://uu0uu.com/pricing"}}
+HTTP 402
+
+## POST /v1/download/report (failed, 0 bytes -> released)
+{"ok":true,"state":"released"}
+HTTP 200
+
+## POST /v1/download/authorize same key (retry re-reserve)
+{"allowed":true,"source":"free","authorizationId":"auth_d5f9e59f-93bb-4a40-bd2f-14e8b4af703a","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null}
+HTTP 200
+
+## GET /v1/entitlement (after retry)
+{"ok":true,"plan":"free","free":{"used":2,"limit":2,"utcDate":"2026-11-18"},"credits":0,"subscription":null,"snapshot":{"v":1,"deviceId":"dev_smoke-0000-0000-0000-000000000001","plan":"free","subscriptionStatus":"none","subscriptionEnd":null,"creditBalance":0,"freeUsed":2,"utcDay":"2026-11-18","issuedAt":1794972145311,"expiresAt":1795231345311},"signature":null,"keyId":null}
+HTTP 200
+
+## GET /v1/entitlement (invalid token, expect 401)
+{"ok":false,"error":"unauthorized"}
+HTTP 401
+
+## OPTIONS /v1/entitlement (CORS preflight, expect 204)
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: chrome-extension://abcdefghijklmnop
+Vary: Origin
+Access-Control-Allow-Headers: Authorization, Content-Type
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Max-Age: 86400
+

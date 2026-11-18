@@ -1,5 +1,5 @@
 import { selectMediaPageTab } from './active-media-tab';
-import { MEDIA_MESSAGE, useStorage, pickBestVariant } from '@extension/shared';
+import { LICENSE_MESSAGE, MEDIA_MESSAGE, useStorage, pickBestVariant } from '@extension/shared';
 import {
   mediaDetectionsStorage,
   mediaDownloadsStorage,
@@ -132,10 +132,45 @@ export const useMediaPage = () => {
       },
     });
     if (!response?.ok) {
-      setDownloadState({ busyUrl: null, error: response?.error ?? 'Download failed' });
+      if (response?.code === 'PAYMENT_REQUIRED') {
+        setDownloadState({
+          busyUrl: null,
+          error: null,
+          paywall: {
+            free: response.free,
+            credits: response.credits,
+            subscription: response.subscription ?? null,
+            upgrade: response.upgrade,
+          },
+        });
+      } else {
+        setDownloadState({ busyUrl: null, error: response?.error ?? 'Download failed' });
+      }
     } else {
       setDownloadState({ busyUrl: null, error: null });
     }
+  };
+
+  const closePaywall = () => setDownloadState(prev => ({ ...prev, paywall: null }));
+
+  const buyProduct = async (productKey: string) => {
+    const response = await chrome.runtime.sendMessage({
+      type: LICENSE_MESSAGE.CHECKOUT,
+      payload: { productKey },
+    });
+    if (!response?.ok)
+      setDownloadState(prev => ({ ...prev, error: response?.error ?? 'Checkout could not be started' }));
+  };
+
+  const restorePurchase = () => {
+    setDownloadState(prev => ({ ...prev, paywall: null }));
+    void chrome.tabs.create({ url: `${chrome.runtime.getURL('options.html')}#license` });
+  };
+
+  const manageSubscription = async () => {
+    const response = await chrome.runtime.sendMessage({ type: LICENSE_MESSAGE.PORTAL });
+    if (!response?.ok)
+      setDownloadState(prev => ({ ...prev, error: response?.error ?? 'Could not open the customer portal' }));
   };
 
   const onCancel = async (key: string) => {
@@ -223,6 +258,10 @@ export const useMediaPage = () => {
     history,
     isLight,
     onDownload,
+    closePaywall,
+    buyProduct,
+    restorePurchase,
+    manageSubscription,
     onCancel,
     onPause,
     onRetry,

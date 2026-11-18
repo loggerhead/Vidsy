@@ -49,7 +49,7 @@ export default defineConfig({
     homepage_url: 'https://uu0uu.com',
     action: { default_title: 'UUGet' },
     name: '__MSG_extensionName__',
-    version: '1.1.0',
+    version: '1.2.0',
     description: '__MSG_extensionDescription__',
     browser_specific_settings: { gecko: { id: 'example@example.com', strict_min_version: '109.0' } },
     host_permissions: ['<all_urls>'],

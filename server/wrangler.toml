@@ -1,0 +1,96 @@
+# UUGet billing Worker (Cloudflare Workers + D1).
+# Local development needs no remote resources: `wrangler dev --local` creates
+# a throwaway D1 database under .wrangler/state.
+#
+# Replace the placeholder D1 database ids before deploying staging/production.
+# Secrets are never stored here; use `wrangler secret put` (see
+# docs/billing/creem-setup.md, added in M2).
+
+name = "uuget-billing"
+main = "src/index.ts"
+compatibility_date = "2026-07-02"
+workers_dev = true
+
+[observability]
+enabled = true
+
+# Hourly reconciliation: commit reservations with no report after 24h and
+# prune old rate-limit buckets (see docs/billing/runbook.md).
+[triggers]
+crons = ["17 * * * *"]
+
+[vars]
+ENVIRONMENT = "development"
+BILLING_ENFORCEMENT = "on"
+CORS_ORIGINS = "https://uu0uu.com"
+PRICING_URL = "https://uu0uu.com/pricing"
+SUPPORT_EMAIL = "support@uu0uu.com"
+EXTENSION_OPTIONS_URL = "chrome-extension://<store-id>/options.html#license"
+RATE_LIMIT_REGISTER_PER_HOUR = "10"
+RATE_LIMIT_AUTHORIZE_PER_MINUTE = "60"
+RATE_LIMIT_CHECKOUT_PER_HOUR = "10"
+CREEM_API_BASE = "https://api.creem.io"
+CHECKOUT_SUCCESS_URL = "https://uu0uu.com/billing/success"
+# productKey -> Creem product id for the current mode (test ids in dev).
+# Empty until the products exist; /v1/checkout then returns 503.
+PRODUCTS_JSON = "{}"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uuget-billing"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[env.staging]
+name = "uuget-billing-staging"
+workers_dev = true
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+BILLING_ENFORCEMENT = "on"
+CORS_ORIGINS = "https://staging.uu0uu.com"
+PRICING_URL = "https://uu0uu.com/pricing"
+SUPPORT_EMAIL = "support@uu0uu.com"
+EXTENSION_OPTIONS_URL = "chrome-extension://<store-id>/options.html#license"
+RATE_LIMIT_REGISTER_PER_HOUR = "10"
+RATE_LIMIT_AUTHORIZE_PER_MINUTE = "60"
+RATE_LIMIT_CHECKOUT_PER_HOUR = "10"
+CREEM_API_BASE = "https://api.creem.io"
+CHECKOUT_SUCCESS_URL = "https://uu0uu.com/billing/success"
+# Creem test-mode product ids.
+PRODUCTS_JSON = "{}"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "uuget-billing-staging"
+database_id = "9f24683e-d0e6-41b6-8343-8b74b5d1a4c5"
+migrations_dir = "migrations"
+
+[env.production]
+name = "uuget-billing"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "billing.uu0uu.com"
+custom_domain = true
+
+[env.production.vars]
+ENVIRONMENT = "production"
+BILLING_ENFORCEMENT = "on"
+CORS_ORIGINS = "https://uu0uu.com"
+PRICING_URL = "https://uu0uu.com/pricing"
+SUPPORT_EMAIL = "support@uu0uu.com"
+EXTENSION_OPTIONS_URL = "chrome-extension://<store-id>/options.html#license"
+RATE_LIMIT_REGISTER_PER_HOUR = "10"
+RATE_LIMIT_AUTHORIZE_PER_MINUTE = "60"
+RATE_LIMIT_CHECKOUT_PER_HOUR = "10"
+CREEM_API_BASE = "https://api.creem.io"
+CHECKOUT_SUCCESS_URL = "https://uu0uu.com/billing/success"
+# Creem live-mode product ids.
+PRODUCTS_JSON = "{\"credits_10\":\"prod_4VOHZYrMiFHIoKZuKZlRUC\",\"credits_50\":\"prod_hslFhZpU2VdrMjwQXTRJM\",\"credits_120\":\"prod_11t9XIGUlZRFOCsjVh6mJ5\",\"credits_300\":\"prod_13aS2HhQtDgbpfAsHKvOR2\",\"pro_monthly\":\"prod_7cpU2njsOmprhXknRcioq2\",\"pro_yearly\":\"prod_5hQGkEl57t58CZe2VYOszw\"}"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "uuget-billing"
+database_id = "78bcc728-f6f9-455a-ae5f-158fed8e1bcd"
+migrations_dir = "migrations"

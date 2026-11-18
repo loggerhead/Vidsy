@@ -1,0 +1,12 @@
+== register ==
+{"ok":true}
+status=200
+== signed checkout.completed ==
+{"ok":true}
+status=200
+== duplicate delivery ==
+{"ok":true,"duplicate":true}
+status=200
+== entitlement after webhook ==
+{"ok":true,"plan":"free","free":{"used":0,"limit":2,"utcDate":"2026-11-18"},"credits":10,"subscription":null,"snapshot":{"v":1,"deviceId":"dev_synth-1794979930430","plan":"free","subscriptionStatus":"none","subscriptionEnd":null,"creditBalance":10,"freeUsed":0,"utcDay":"2026-11-18","issuedAt":1794979946797,"expiresAt":1795239146797},"signature":"Z9blQeNp6ukEL7L45xmHzC8uzDlC5mKB5JeSjk+fBhIZcRd0li6z081nL8kvVPOJi9WfOTgY+sAZENnxDIOfhw==","keyId":"uuget-2026-11"}
+status=200

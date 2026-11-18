@@ -1,5 +1,5 @@
-import type { ColorType } from './types.js';
 import { createLogger } from './runtime-logger.js';
+import type { ColorType } from './types.js';
 
 export const colorfulLog = (message: string, type: ColorType) => {
   const log = createLogger('shared');

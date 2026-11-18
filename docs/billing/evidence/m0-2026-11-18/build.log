@@ -1,0 +1,81 @@
+
+> uuget@1.1.0 build /Users/bytedance/my-projects/Vidsy
+> wxt build && pnpm sync:chrome-artifact
+
+
+WXT 0.21.4
+ℹ Building chrome-mv3 for production with Vite 6.4.4
+[?25l⠋ Preparing...[K⠋ [1/10] all[KBrowserslist: browsers data (caniuse-lite) is 18 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+⠙ [1/10] all[K⠹ [1/10] all[K⠸ [1/10] all[K⠸ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠼ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠴ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠦ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠧ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠇ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠏ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠋ [2/10] background, devtools-panel, devtools, new-tab, offscreen, options, popup, side-panel[K⠋ [3/10] content-ui-example[K⠙ [3/10] content-ui-example[K⠹ [3/10] content-ui-example[K⠸ [3/10] content-ui-example[K⠸ [4/10] content-ui[K⠼ [4/10] content-ui[K⠴ [4/10] content-ui[K⠦ [4/10] content-ui[K⠦ [5/10] download-worker[K⠧ [5/10] download-worker[K⠇ [5/10] download-worker[K⠇ [6/10] example[K⠏ [6/10] example[K⠏ [7/10] vimeo-main[K⠋ [7/10] vimeo-main[K⠋ [8/10] vimeo[K⠙ [8/10] vimeo[K⠙ [9/10] youtube-main[K⠙ [10/10] youtube[K⠹ [10/10] youtube[K⠸ [10/10] youtube[K[K[?25h[K[?25h✔ Built extension in 2.957 s
+  ├─ .output/chrome-mv3/manifest.json                                      2.00 kB  
+  ├─ .output/chrome-mv3/devtools-panel.html                                809 B    
+  ├─ .output/chrome-mv3/devtools.html                                      392 B    
+  ├─ .output/chrome-mv3/new-tab.html                                       858 B    
+  ├─ .output/chrome-mv3/offscreen.html                                     623 B    
+  ├─ .output/chrome-mv3/options.html                                       879 B    
+  ├─ .output/chrome-mv3/popup.html                                         1.01 kB  
+  ├─ .output/chrome-mv3/side-panel.html                                    1.04 kB  
+  ├─ .output/chrome-mv3/background.js                                      104.78 kB
+  ├─ .output/chrome-mv3/chunks/_virtual_wxt-html-plugins-SDhr9ZoC.js       837 B    
+  ├─ .output/chrome-mv3/chunks/_virtual_wxt-plugins-CDnz5Vh6.js            25 B     
+  ├─ .output/chrome-mv3/chunks/base-YL1mMfJj.js                            1.36 kB  
+  ├─ .output/chrome-mv3/chunks/BottomBar-BMHv2xe6.js                       21.95 kB 
+  ├─ .output/chrome-mv3/chunks/cjs-eDIarWcF.js                             227.14 kB
+  ├─ .output/chrome-mv3/chunks/devtools-CsusBIc9.js                        173 B    
+  ├─ .output/chrome-mv3/chunks/devtools-panel-Dw-GadfZ.js                  1.22 kB  
+  ├─ .output/chrome-mv3/chunks/ErrorDisplay-ByLxylNL.js                    4.81 kB  
+  ├─ .output/chrome-mv3/chunks/FilenameTemplateField-Cp2Zd9z6.js           2.29 kB  
+  ├─ .output/chrome-mv3/chunks/index-BMaHF3WN.js                           108 B    
+  ├─ .output/chrome-mv3/chunks/index-CYXrZRJS.js                           16.76 kB 
+  ├─ .output/chrome-mv3/chunks/media-COYVjuB2.js                           1.32 kB  
+  ├─ .output/chrome-mv3/chunks/media-storage-BtVZSJGh.js                   3.67 kB  
+  ├─ .output/chrome-mv3/chunks/new-tab-DWogLiDT.js                         1.39 kB  
+  ├─ .output/chrome-mv3/chunks/offscreen-DygH8O47.js                       62.31 kB 
+  ├─ .output/chrome-mv3/chunks/options-DF4R6tLa.js                         28.13 kB 
+  ├─ .output/chrome-mv3/chunks/popup-DxR4UUj8.js                           36.04 kB 
+  ├─ .output/chrome-mv3/chunks/runtime-logger-DrIGpJod.js                  1.18 kB  
+  ├─ .output/chrome-mv3/chunks/side-panel-CJSanKIM.js                      15.94 kB 
+  ├─ .output/chrome-mv3/chunks/source-renewal-CZgZeAAU.js                  28.61 kB 
+  ├─ .output/chrome-mv3/content-scripts/all.js                             23.17 kB 
+  ├─ .output/chrome-mv3/content-scripts/content-ui-example.js              262.71 kB
+  ├─ .output/chrome-mv3/content-scripts/content-ui.js                      267.93 kB
+  ├─ .output/chrome-mv3/content-scripts/example.js                         5.21 kB  
+  ├─ .output/chrome-mv3/content-scripts/vimeo-main.js                      1.69 kB  
+  ├─ .output/chrome-mv3/content-scripts/vimeo.js                           6.83 kB  
+  ├─ .output/chrome-mv3/content-scripts/youtube-main.js                    1.65 kB  
+  ├─ .output/chrome-mv3/content-scripts/youtube.js                         13.25 kB 
+  ├─ .output/chrome-mv3/download-worker.js                                 50.33 kB 
+  ├─ .output/chrome-mv3/assets/devtools-panel-BrWvsQOW.css                 33.06 kB 
+  ├─ .output/chrome-mv3/assets/new-tab-D_g-RqdS.css                        33.00 kB 
+  ├─ .output/chrome-mv3/assets/options-CVpQ2NaG.css                        32.72 kB 
+  ├─ .output/chrome-mv3/assets/popup-CIXUSzdb.css                          33.95 kB 
+  ├─ .output/chrome-mv3/content.css                                        0 B      
+  ├─ .output/chrome-mv3/_locales/en/messages.json                          817 B    
+  ├─ .output/chrome-mv3/_locales/ko/messages.json                          817 B    
+  ├─ .output/chrome-mv3/devtools-panel/logo_horizontal_dark.svg            541 B    
+  ├─ .output/chrome-mv3/devtools-panel/logo_horizontal.svg                 541 B    
+  ├─ .output/chrome-mv3/icon-128.png                                       4.58 kB  
+  ├─ .output/chrome-mv3/icon-34.png                                        1.61 kB  
+  ├─ .output/chrome-mv3/libav/libav-6.8.8.0-web-media-remux-cli.mjs        31.30 kB 
+  ├─ .output/chrome-mv3/libav/libav-6.8.8.0-web-media-remux-cli.wasm.mjs   321.01 kB
+  ├─ .output/chrome-mv3/libav/libav-6.8.8.0-web-media-remux-cli.wasm.wasm  3.37 MB  
+  ├─ .output/chrome-mv3/libav/LICENSE.LGPL-2.1                             26.42 kB 
+  ├─ .output/chrome-mv3/libav/NOTICE.md                                    2.96 kB  
+  ├─ .output/chrome-mv3/new-tab/logo_horizontal_dark.svg                   541 B    
+  ├─ .output/chrome-mv3/new-tab/logo_horizontal.svg                        541 B    
+  ├─ .output/chrome-mv3/options/logo_horizontal_dark.svg                   541 B    
+  ├─ .output/chrome-mv3/options/logo_horizontal.svg                        541 B    
+  ├─ .output/chrome-mv3/popup/logo_vertical_dark.svg                       575 B    
+  ├─ .output/chrome-mv3/popup/logo_vertical.svg                            575 B    
+  ├─ .output/chrome-mv3/side-panel/logo_vertical_dark.svg                  575 B    
+  └─ .output/chrome-mv3/side-panel/logo_vertical.svg                       575 B    
+Σ Total size: 5.10 MB                                                    
+✔ Finished in 3.217 s
+
+> uuget@1.1.0 sync:chrome-artifact /Users/bytedance/my-projects/Vidsy
+> node tools/sync-chrome-artifact.mjs
+
+Updated /Users/bytedance/Downloads/UUGet (version 1.1.0)
+build_exit=0

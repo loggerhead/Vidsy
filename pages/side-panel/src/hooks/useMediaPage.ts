@@ -1,4 +1,4 @@
-import { MEDIA_MESSAGE, useStorage, pickBestVariant } from '@extension/shared';
+import { LICENSE_MESSAGE, MEDIA_MESSAGE, useStorage, pickBestVariant } from '@extension/shared';
 import {
   mediaDetectionsStorage,
   mediaDownloadsStorage,
@@ -105,8 +105,44 @@ export const useMediaPage = () => {
         },
       },
     });
-    if (!res?.ok) setDownloadState({ busyUrl: null, error: res?.error ?? 'Download failed' });
-    else setDownloadState({ busyUrl: null, error: null });
+    if (!res?.ok) {
+      if (res?.code === 'PAYMENT_REQUIRED') {
+        setDownloadState({
+          busyUrl: null,
+          error: null,
+          paywall: {
+            free: res.free,
+            credits: res.credits,
+            subscription: res.subscription ?? null,
+            upgrade: res.upgrade,
+          },
+        });
+      } else {
+        setDownloadState({ busyUrl: null, error: res?.error ?? 'Download failed' });
+      }
+    } else setDownloadState({ busyUrl: null, error: null });
+  };
+
+  const closePaywall = () => setDownloadState(prev => ({ ...prev, paywall: null }));
+
+  const buyProduct = async (productKey: string) => {
+    const response = await chrome.runtime.sendMessage({
+      type: LICENSE_MESSAGE.CHECKOUT,
+      payload: { productKey },
+    });
+    if (!response?.ok)
+      setDownloadState(prev => ({ ...prev, error: response?.error ?? 'Checkout could not be started' }));
+  };
+
+  const restorePurchase = () => {
+    setDownloadState(prev => ({ ...prev, paywall: null }));
+    void chrome.tabs.create({ url: `${chrome.runtime.getURL('options.html')}#license` });
+  };
+
+  const manageSubscription = async () => {
+    const response = await chrome.runtime.sendMessage({ type: LICENSE_MESSAGE.PORTAL });
+    if (!response?.ok)
+      setDownloadState(prev => ({ ...prev, error: response?.error ?? 'Could not open the customer portal' }));
   };
 
   const onCancel = async (key: string) => {
@@ -197,6 +233,10 @@ export const useMediaPage = () => {
     forceDetecting,
     forceDetectDone,
     onDownload,
+    closePaywall,
+    buyProduct,
+    restorePurchase,
+    manageSubscription,
     onCancel,
     onPause,
     onRetry,

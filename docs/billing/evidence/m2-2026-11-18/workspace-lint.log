@@ -1,0 +1,104 @@
+
+> uuget@1.1.0 lint /Users/bytedance/my-projects/Vidsy
+> turbo lint --continue
+
+turbo 2.5.6
+
+• Packages in scope: @extension/billing-worker, @extension/content-runtime-script, @extension/content-script, @extension/content-ui, @extension/dev-utils, @extension/devtools, @extension/devtools-panel, @extension/e2e, @extension/env, @extension/hmr, @extension/i18n, @extension/new-tab, @extension/options, @extension/popup, @extension/shared, @extension/sidepanel, @extension/storage, @extension/tailwindcss-config, @extension/tsconfig, @extension/ui, @extension/vite-config, chrome-extension
+• Running lint in 22 packages
+• Remote caching disabled
+@extension/hmr:lint: cache bypass, force executing 0c2c408b5cb1b262
+@extension/i18n:lint: cache bypass, force executing a7df4406f3cc4cfa
+@extension/devtools:lint: cache bypass, force executing b9f5dc871d40694b
+@extension/devtools-panel:lint: cache bypass, force executing ac2f5aa6aa68ddef
+chrome-extension:lint: cache bypass, force executing 180a0dc93c25071c
+@extension/ui:lint: cache bypass, force executing fdae85f9e2504a1b
+@extension/new-tab:lint: cache bypass, force executing 496db96b2cead3e4
+@extension/popup:lint: cache bypass, force executing 908af80a649728ef
+@extension/shared:lint: cache bypass, force executing e6192f387518312f
+@extension/content-runtime-script:lint: cache bypass, force executing 6dc12bbbf59d9ec3
+@extension/sidepanel:lint: cache bypass, force executing c0c15ccd9092a1a2
+@extension/content-ui:lint: cache bypass, force executing 5483c8b6327d292c
+@extension/i18n:lint: 
+@extension/i18n:lint: > @extension/i18n@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/i18n
+@extension/i18n:lint: > eslint .
+@extension/i18n:lint: 
+@extension/hmr:lint: 
+@extension/hmr:lint: > @extension/hmr@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/hmr
+@extension/hmr:lint: > eslint .
+@extension/hmr:lint: 
+@extension/devtools:lint: 
+@extension/devtools:lint: > @extension/devtools@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/devtools
+@extension/devtools:lint: > eslint .
+@extension/devtools:lint: 
+chrome-extension:lint: 
+chrome-extension:lint: > chrome-extension@1.1.0 lint /Users/bytedance/my-projects/Vidsy/chrome-extension
+chrome-extension:lint: > eslint .
+chrome-extension:lint: 
+@extension/devtools-panel:lint: 
+@extension/devtools-panel:lint: > @extension/devtools-panel@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/devtools-panel
+@extension/devtools-panel:lint: > eslint .
+@extension/devtools-panel:lint: 
+@extension/ui:lint: 
+@extension/ui:lint: > @extension/ui@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/ui
+@extension/ui:lint: > eslint .
+@extension/ui:lint: 
+@extension/popup:lint: 
+@extension/popup:lint: > @extension/popup@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/popup
+@extension/popup:lint: > eslint .
+@extension/popup:lint: 
+@extension/sidepanel:lint: 
+@extension/sidepanel:lint: > @extension/sidepanel@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/side-panel
+@extension/sidepanel:lint: > eslint .
+@extension/sidepanel:lint: 
+@extension/content-runtime-script:lint: 
+@extension/content-runtime-script:lint: > @extension/content-runtime-script@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/content-runtime
+@extension/content-runtime-script:lint: > eslint .
+@extension/content-runtime-script:lint: 
+@extension/new-tab:lint: 
+@extension/new-tab:lint: > @extension/new-tab@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/new-tab
+@extension/new-tab:lint: > eslint .
+@extension/new-tab:lint: 
+@extension/shared:lint: 
+@extension/shared:lint: > @extension/shared@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/shared
+@extension/shared:lint: > eslint .
+@extension/shared:lint: 
+@extension/content-ui:lint: 
+@extension/content-ui:lint: > @extension/content-ui@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/content-ui
+@extension/content-ui:lint: > eslint .
+@extension/content-ui:lint: 
+@extension/content-script:lint: cache bypass, force executing df43acee9766ea5c
+@extension/env:lint: cache bypass, force executing a7a8f740ec6c2048
+@extension/billing-worker:lint: cache bypass, force executing c320c71a9b8fab30
+@extension/storage:lint: cache bypass, force executing 345c21f5f3d20967
+@extension/options:lint: cache bypass, force executing e7cc8861096776de
+@extension/dev-utils:lint: cache bypass, force executing 80ba77f7487f22b4
+@extension/options:lint: 
+@extension/options:lint: > @extension/options@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/options
+@extension/options:lint: > eslint .
+@extension/options:lint: 
+@extension/storage:lint: 
+@extension/storage:lint: > @extension/storage@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/storage
+@extension/storage:lint: > eslint .
+@extension/storage:lint: 
+@extension/billing-worker:lint: 
+@extension/billing-worker:lint: > @extension/billing-worker@1.1.0 lint /Users/bytedance/my-projects/Vidsy/server
+@extension/billing-worker:lint: > eslint .
+@extension/billing-worker:lint: 
+@extension/env:lint: 
+@extension/env:lint: > @extension/env@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/env
+@extension/env:lint: > eslint .
+@extension/env:lint: 
+@extension/content-script:lint: 
+@extension/content-script:lint: > @extension/content-script@1.1.0 lint /Users/bytedance/my-projects/Vidsy/pages/content
+@extension/content-script:lint: > eslint .
+@extension/content-script:lint: 
+@extension/dev-utils:lint: 
+@extension/dev-utils:lint: > @extension/dev-utils@1.1.0 lint /Users/bytedance/my-projects/Vidsy/packages/dev-utils
+@extension/dev-utils:lint: > eslint .
+@extension/dev-utils:lint: 
+
+ Tasks:    18 successful, 18 total
+Cached:    0 cached, 18 total
+  Time:    14.982s 
+

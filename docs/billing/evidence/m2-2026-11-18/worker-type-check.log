@@ -1,0 +1,4 @@
+
+> @extension/billing-worker@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/server
+> tsc --noEmit
+

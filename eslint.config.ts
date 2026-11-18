@@ -31,8 +31,10 @@ export default config(
       '**/build/**',
       '**/dist/**',
       '**/node_modules/**',
+      '**/.wrangler/**',
       'chrome-extension/manifest.js',
       'chrome-extension/public/ffmpeg/**',
+      'chrome-extension/public/libav/**',
     ],
   },
   {
@@ -44,7 +46,12 @@ export default config(
       parserOptions: {
         ecmaFeatures: { jsx: true },
         projectService: {
-          allowDefaultProject: ['entrypoints/all.content.ts', 'entrypoints/content-ui.content.ts'],
+          allowDefaultProject: [
+            'entrypoints/all.content.ts',
+            'entrypoints/content-ui.content.ts',
+            'server/vitest.config.ts',
+            'vitest.config.ts',
+          ],
         },
       },
       globals: {

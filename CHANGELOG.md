@@ -2,7 +2,21 @@
 
 All notable user-facing changes to UUGet. Dates are in UTC.
 
-## Unreleased — download recovery M0–M5
+## 1.2.0 — 2026-11-18
+
+### Added — billing and licensing
+
+- Free daily quota of 2 downloads (UTC day), with a paywall when the quota is exhausted.
+- Credit packs and Pro monthly/yearly subscriptions via Creem. The paywall shows the live `used/limit` counter, credit packs, Pro plans, restore and manage-subscription entries, and Privacy/Terms/Refunds links.
+- Options → License panel: entitlement status card, free-quota bar, credit balance, subscription state, buy credits/Pro, restore purchase with a Creem License Key (up to 3 devices), manage subscription through the Creem customer portal, manual refresh, and policy links.
+- Server-enforced authorization: downloads reserve quota/credits when they start and commit only after bytes are transferred. Duplicate authorize/report/webhook calls are idempotent; `resume` never re-authorizes and `retry` re-reserves only after a released attempt under the same download key.
+- Signed offline grace: the extension verifies an ECDSA P-256 snapshot from the billing service (valid up to 72 hours) so paid entitlements keep working offline. Free usage is capped by the snapshot and offline reports are queued and backfilled on reconnect without double charging.
+- Hourly reconciliation sweep for stale reservations and 24-hour local reservation reconciliation; `BILLING_ENFORCEMENT=off` kill switch allows all downloads without consuming quota.
+- Account deletion via `DELETE /v1/account` or support email: revokes device tokens, license activations and subscriptions, and anonymizes the account while retaining accounting records.
+- Privacy policy updated for billing data (anonymous device ID, token hash, Creem purchase email, purchase state, daily usage); added Terms of Service and Refund Policy pages and a `/billing/success` return page.
+- Operator runbook covering reconciliation, refunds/chargebacks/negative balances, license activations, snapshot key rotation, kill switch/rollback and multi-email manual merge.
+
+### Added — download recovery (M0–M5)
 
 - Retain completed ranges, atomic HLS/DASH parts and complete media inputs on transfer or mux failure. Retry checks cached input and fetches only missing ranges/parts or reruns processing.
 - Surface transport, processing and integrity failures with actionable reasons. Integrity failures discard affected inputs; ignored Range responses no longer silently erase progress and switch to a full stream download.

@@ -4,6 +4,7 @@ import { createLocalDownloadStore } from './download-persistence';
 import { AUTO_RECOVERY_ALARM } from './download-recovery';
 import { createDownloadRuntime } from './download-runtime';
 import { findDownloadHeaders, waitForCapturedHeaders } from './header-capture';
+import { authorizeDownload, ensureRetryAuthorization, reportDownloadOutcome } from './license';
 import { clearProgress, updateProgress } from './progress';
 import { resourceLocator } from './resource-identity';
 import { mediaSettingsStorage } from '@extension/storage';
@@ -162,6 +163,13 @@ const projectSnapshot = async () => {
         cacheExpiresAt: job.cacheExpiresAt,
       },
     );
+    if (job.state === 'succeeded' || job.state === 'failed' || job.state === 'cancelled') {
+      await reportDownloadOutcome({
+        downloadKey: job.requestId,
+        outcome: job.state === 'succeeded' ? 'success' : job.state,
+        bytesDownloaded: job.progress.downloadedBytes,
+      });
+    }
     projected.set(job.jobId, revision);
   }
   await syncAutomaticRecoveryAlarm();
@@ -314,7 +322,18 @@ const enqueueDownload = async (payload: DownloadPayload, item: MediaItem) => {
     await commandDownload(job.jobId, { type: job.state === 'paused' ? 'resume' : 'retry', revalidateCompleted: true });
     return { jobId: job.jobId, duplicate: true, resumed: true, key: job.requestId };
   }
-  const result = await runtime.submit(submission);
+  await authorizeDownload({ downloadKey: requestId, kind: submission.execution.kind });
+  let result: { jobId: string; duplicate: boolean };
+  try {
+    result = await runtime.submit(submission);
+  } catch (error) {
+    // The queue never accepted the job, so no bytes moved: release the
+    // reservation under the same key.
+    await reportDownloadOutcome({ downloadKey: requestId, outcome: 'failed', bytesDownloaded: 0 }).catch(
+      () => undefined,
+    );
+    throw error;
+  }
   return publishSubmission(result, requestId);
 };
 
@@ -335,13 +354,26 @@ const resubmitDownload = async (key: string, requestId: string) => {
     detectedAt: job.createdAt,
     source: 'network',
   };
-  const result = await runtime.submit({ requestId, execution, display: job.display });
+  await authorizeDownload({ downloadKey: requestId, kind: execution.kind });
+  let result: { jobId: string; duplicate: boolean };
+  try {
+    result = await runtime.submit({ requestId, execution, display: job.display });
+  } catch (error) {
+    await reportDownloadOutcome({ downloadKey: requestId, outcome: 'failed', bytesDownloaded: 0 }).catch(
+      () => undefined,
+    );
+    throw error;
+  }
   return publishSubmission(result, requestId);
 };
 
 const commandDownload = async (key: string, command: DownloadCommand, schedule = true): Promise<boolean> => {
   const job = (await runtime.snapshot()).jobs.find(item => item.requestId === key || item.jobId === key);
   if (!job) return false;
+  // Resume never re-authorizes. Retry re-reserves only when the previous
+  // attempt released its authorization (zero bytes); committed retries are
+  // already paid for under the same download key.
+  if (command.type === 'retry') await ensureRetryAuthorization(job.requestId, job.execution.kind);
   const changed = await runtime.command(job.jobId, command);
   if (changed && command.type === 'cancel' && !job.executionId)
     await adapter.cancel?.({

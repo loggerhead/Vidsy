@@ -28,5 +28,170 @@
   "hello": {
     "description": "Placeholder example",
     "message": "Hello $1"
+  },
+  "paywallTitle": {
+    "message": "오늘의 무료 다운로드를 모두 사용했습니다"
+  },
+  "paywallBody": {
+    "message": "가끔 다운로드한다면 크레딧 팩을, 무제한으로 받으려면 Pro를 구독하세요."
+  },
+  "paywallFreeUsed": {
+    "message": "오늘 사용한 무료 다운로드"
+  },
+  "paywallCreditsTitle": {
+    "message": "크레딧 팩"
+  },
+  "paywallCreditsUnit": {
+    "message": "크레딧"
+  },
+  "paywallProTitle": {
+    "message": "UUGet Pro"
+  },
+  "paywallProBody": {
+    "message": "구독이 활성화된 동안 무제한으로 다운로드할 수 있습니다."
+  },
+  "paywallProMonthly": {
+    "message": "월간"
+  },
+  "paywallProYearly": {
+    "message": "연간"
+  },
+  "paywallManage": {
+    "message": "구독 관리"
+  },
+  "paywallRestore": {
+    "message": "구매 복원"
+  },
+  "paywallPrivacy": {
+    "message": "개인정보"
+  },
+  "paywallTerms": {
+    "message": "약관"
+  },
+  "paywallRefund": {
+    "message": "환불"
+  },
+  "paywallClose": {
+    "message": "닫기"
+  },
+  "paywallWaiting": {
+    "message": "결제를 기다리는 중…"
+  },
+  "licenseTitle": {
+    "message": "라이선스"
+  },
+  "licenseSubtitle": {
+    "message": "무료 할당량, 크레딧, Pro 구독을 관리하세요."
+  },
+  "licensePlanFree": {
+    "message": "무료 플랜"
+  },
+  "licensePlanPro": {
+    "message": "Pro 플랜"
+  },
+  "licenseOffline": {
+    "message": "오프라인 — 마지막 동기화 상태"
+  },
+  "licenseDevice": {
+    "message": "기기"
+  },
+  "licenseRefresh": {
+    "message": "새로 고침"
+  },
+  "licenseRefreshing": {
+    "message": "새로 고치는 중…"
+  },
+  "licenseFreeToday": {
+    "message": "오늘 무료"
+  },
+  "licenseCredits": {
+    "message": "크레딧"
+  },
+  "licenseSubscription": {
+    "message": "구독"
+  },
+  "licenseStatusNone": {
+    "message": "없음"
+  },
+  "licenseStatusActive": {
+    "message": "활성"
+  },
+  "licenseStatusTrialing": {
+    "message": "체험 중"
+  },
+  "licenseStatusScheduledCancel": {
+    "message": "기간 종료 시 해지"
+  },
+  "licenseStatusCanceled": {
+    "message": "해지됨"
+  },
+  "licenseStatusExpired": {
+    "message": "만료됨"
+  },
+  "licenseStatusPaused": {
+    "message": "일시 중지"
+  },
+  "licensePendingReports": {
+    "message": "개의 다운로드 보고가 동기화 대기 중"
+  },
+  "licenseManage": {
+    "message": "구독 관리"
+  },
+  "licenseBuyCreditsTitle": {
+    "message": "크레딧 구매"
+  },
+  "licenseBuyProTitle": {
+    "message": "Pro 구독"
+  },
+  "licenseBuy": {
+    "message": "구매"
+  },
+  "licenseProMonthly": {
+    "message": "Pro 월간"
+  },
+  "licenseProYearly": {
+    "message": "Pro 연간"
+  },
+  "licenseRestoreTitle": {
+    "message": "구매 복원"
+  },
+  "licenseRestoreBody": {
+    "message": "Creem 구매 이메일에 있는 라이선스 키를 붙여넣으세요."
+  },
+  "licenseKeyPlaceholder": {
+    "message": "XXXX-XXXX-XXXX"
+  },
+  "licenseActivate": {
+    "message": "활성화"
+  },
+  "licenseRestoreHint": {
+    "message": "라이선스 키는 최대 3대의 기기에서 사용할 수 있습니다. 새 기기를 활성화하기 전에 Creem 고객 포털에서 이전 기기를 비활성화하세요."
+  },
+  "licenseActivating": {
+    "message": "활성화 중…"
+  },
+  "licenseActivated": {
+    "message": "라이선스가 활성화되었습니다. 권한이 갱신되었습니다."
+  },
+  "licenseWaitingPayment": {
+    "message": "결제를 기다리는 중… 이 페이지는 자동으로 새로 고쳐집니다."
+  },
+  "licensePurchaseDetected": {
+    "message": "구매가 확인되었습니다. 권한이 갱신되었습니다."
+  },
+  "licenseLoading": {
+    "message": "라이선스 상태를 불러오는 중…"
+  },
+  "licensePrivacy": {
+    "message": "개인정보"
+  },
+  "licenseTerms": {
+    "message": "약관"
+  },
+  "licenseRefund": {
+    "message": "환불"
+  },
+  "licenseActionFailed": {
+    "message": "문제가 발생했습니다. 다시 시도하세요."
   }
 }

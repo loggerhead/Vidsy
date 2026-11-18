@@ -1,7 +1,7 @@
 import { exampleThemeStorage } from '@extension/storage';
 import { cn } from '@extension/ui';
 
-type Tab = 'settings' | 'history' | 'about';
+type Tab = 'settings' | 'history' | 'license' | 'about';
 
 const IconSettings = () => (
   <svg
@@ -52,6 +52,23 @@ const IconInfo = () => (
   </svg>
 );
 
+const IconLicense = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round">
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <path d="M2 10h20" />
+    <path d="M6 15h4" />
+  </svg>
+);
+
 const IconSun = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -86,6 +103,7 @@ const IconMoon = () => (
 const navItems: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'settings', label: 'Settings', icon: <IconSettings /> },
   { id: 'history', label: 'History', icon: <IconHistory /> },
+  { id: 'license', label: 'License', icon: <IconLicense /> },
   { id: 'about', label: 'About', icon: <IconInfo /> },
 ];
 

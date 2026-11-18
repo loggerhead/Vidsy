@@ -1,0 +1,32 @@
+{
+  "name": "@extension/billing-worker",
+  "version": "1.2.0",
+  "description": "UUGet billing Worker — device entitlements, credits, subscriptions",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "pnpm lint --fix",
+    "d1:migrate:local": "wrangler d1 migrations apply uuget-billing --local",
+    "d1:migrate:staging": "wrangler d1 migrations apply uuget-billing-staging --remote --env staging",
+    "d1:migrate:production": "wrangler d1 migrations apply uuget-billing --remote --env production"
+  },
+  "dependencies": {
+    "@extension/shared": "workspace:*",
+    "hono": "^4.13.19"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@cloudflare/workers-types": "^5.20261118.1",
+    "@extension/tsconfig": "workspace:*",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.164.0"
+  }
+}

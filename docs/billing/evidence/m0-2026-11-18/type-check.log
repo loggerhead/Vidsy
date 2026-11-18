@@ -1,0 +1,100 @@
+
+> uuget@1.1.0 type-check /Users/bytedance/my-projects/Vidsy
+> turbo type-check
+
+turbo 2.5.6
+
+• Packages in scope: @extension/content-runtime-script, @extension/content-script, @extension/content-ui, @extension/dev-utils, @extension/devtools, @extension/devtools-panel, @extension/e2e, @extension/env, @extension/hmr, @extension/i18n, @extension/new-tab, @extension/options, @extension/popup, @extension/shared, @extension/sidepanel, @extension/storage, @extension/tailwindcss-config, @extension/tsconfig, @extension/ui, @extension/vite-config, chrome-extension
+• Running type-check in 21 packages
+• Remote caching disabled
+@extension/sidepanel:type-check: cache bypass, force executing 8b90326a8499e06f
+@extension/ui:type-check: cache bypass, force executing af008bd75b16e110
+@extension/options:type-check: cache bypass, force executing 9ba00e854f523486
+@extension/dev-utils:type-check: cache bypass, force executing f3c8a6712c0780bd
+@extension/new-tab:type-check: cache bypass, force executing 08d95b1282c20c8f
+@extension/devtools-panel:type-check: cache bypass, force executing 42f73bc496c24821
+@extension/storage:type-check: cache bypass, force executing 0635b9ec9489792d
+@extension/shared:type-check: cache bypass, force executing 7809373299187537
+@extension/i18n:type-check: cache bypass, force executing 4c586e67d3fd9343
+@extension/content-runtime-script:type-check: cache bypass, force executing 571d1f9e3f60632e
+@extension/content-script:type-check: cache bypass, force executing 1ef6fdd427572be7
+chrome-extension:type-check: cache bypass, force executing 458d0a6c65e9dce7
+@extension/ui:type-check: 
+@extension/ui:type-check: > @extension/ui@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/ui
+@extension/ui:type-check: > tsc --noEmit
+@extension/ui:type-check: 
+@extension/new-tab:type-check: 
+@extension/new-tab:type-check: > @extension/new-tab@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/new-tab
+@extension/new-tab:type-check: > tsc --noEmit
+@extension/new-tab:type-check: 
+@extension/sidepanel:type-check: 
+@extension/sidepanel:type-check: > @extension/sidepanel@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/side-panel
+@extension/sidepanel:type-check: > tsc --noEmit
+@extension/sidepanel:type-check: 
+@extension/dev-utils:type-check: 
+@extension/dev-utils:type-check: > @extension/dev-utils@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/dev-utils
+@extension/dev-utils:type-check: > tsc --noEmit
+@extension/dev-utils:type-check: 
+@extension/devtools-panel:type-check: 
+@extension/devtools-panel:type-check: > @extension/devtools-panel@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/devtools-panel
+@extension/devtools-panel:type-check: > tsc --noEmit
+@extension/devtools-panel:type-check: 
+@extension/shared:type-check: 
+@extension/shared:type-check: > @extension/shared@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/shared
+@extension/shared:type-check: > tsc --noEmit
+@extension/shared:type-check: 
+@extension/options:type-check: 
+@extension/options:type-check: > @extension/options@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/options
+@extension/options:type-check: > tsc --noEmit
+@extension/options:type-check: 
+@extension/i18n:type-check: 
+@extension/i18n:type-check: > @extension/i18n@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/i18n
+@extension/i18n:type-check: > tsc --noEmit
+@extension/i18n:type-check: 
+@extension/storage:type-check: 
+@extension/storage:type-check: > @extension/storage@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/storage
+@extension/storage:type-check: > tsc --noEmit
+@extension/storage:type-check: 
+@extension/content-runtime-script:type-check: 
+@extension/content-runtime-script:type-check: > @extension/content-runtime-script@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/content-runtime
+@extension/content-runtime-script:type-check: > tsc --noEmit
+@extension/content-runtime-script:type-check: 
+@extension/content-script:type-check: 
+@extension/content-script:type-check: > @extension/content-script@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/content
+@extension/content-script:type-check: > tsc --noEmit
+@extension/content-script:type-check: 
+chrome-extension:type-check: 
+chrome-extension:type-check: > chrome-extension@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/chrome-extension
+chrome-extension:type-check: > tsc --noEmit
+chrome-extension:type-check: 
+@extension/popup:type-check: cache bypass, force executing e9c7ee1d76d66529
+@extension/env:type-check: cache bypass, force executing 8920fdc00d73e270
+@extension/content-ui:type-check: cache bypass, force executing c99cbc2e40842c49
+@extension/hmr:type-check: cache bypass, force executing b656cee263b1ed21
+@extension/devtools:type-check: cache bypass, force executing d7c18268214b3e33
+@extension/popup:type-check: 
+@extension/popup:type-check: > @extension/popup@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/popup
+@extension/popup:type-check: > tsc --noEmit
+@extension/popup:type-check: 
+@extension/hmr:type-check: 
+@extension/hmr:type-check: > @extension/hmr@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/hmr
+@extension/hmr:type-check: > tsc --noEmit
+@extension/hmr:type-check: 
+@extension/env:type-check: 
+@extension/env:type-check: > @extension/env@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/packages/env
+@extension/env:type-check: > tsc --noEmit
+@extension/env:type-check: 
+@extension/content-ui:type-check: 
+@extension/content-ui:type-check: > @extension/content-ui@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/content-ui
+@extension/content-ui:type-check: > tsc --noEmit
+@extension/content-ui:type-check: 
+@extension/devtools:type-check: 
+@extension/devtools:type-check: > @extension/devtools@1.1.0 type-check /Users/bytedance/my-projects/Vidsy/pages/devtools
+@extension/devtools:type-check: > tsc --noEmit
+@extension/devtools:type-check: 
+
+ Tasks:    17 successful, 17 total
+Cached:    0 cached, 17 total
+  Time:    5.696s 
+
+exit=0
